@@ -24,7 +24,11 @@ class PackageManager:
         install_path = install_dir or self.config.get("install_directory")
         self.install_dir = Path(install_path)
         self.install_dir.mkdir(exist_ok=True)
-        self.packages_config_dir = Path(__file__).parent.parent / "packages" / "configs"
+
+        # When bundled with PyInstaller, data files are located inside
+        # `sys._MEIPASS`. Fall back to the repository path in development.
+        base_path = Path(getattr(sys, "_MEIPASS", Path(__file__).parent.parent))
+        self.packages_config_dir = base_path / "packages" / "configs"
         
     def get_available_packages(self) -> List[Dict]:
         """Get list of available packages from config files"""
