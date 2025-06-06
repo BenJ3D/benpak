@@ -41,9 +41,10 @@ class PackageInstallWorker(QThread):
 
 class PackageWidget(QFrame):
     """Widget representing a single package"""
-    
+
     install_requested = pyqtSignal(dict)
     uninstall_requested = pyqtSignal(str)
+    open_requested = pyqtSignal(dict)
     
     def __init__(self, package, is_installed=False, version=None):
         super().__init__()
@@ -103,15 +104,23 @@ class PackageWidget(QFrame):
         button_layout = QVBoxLayout()
         
         if self.is_installed:
+            self.open_button = QPushButton("Open")
+            self.open_button.setStyleSheet("background-color: #3498db;")
+            self.open_button.clicked.connect(self.open_package)
+
             self.action_button = QPushButton("Uninstall")
             self.action_button.setStyleSheet("background-color: #e74c3c;")
             self.action_button.clicked.connect(self.uninstall_package)
+
+            button_layout.addWidget(self.open_button)
+            button_layout.addWidget(self.action_button)
         else:
             self.action_button = QPushButton("Install")
             self.action_button.setStyleSheet("background-color: #27ae60;")
             self.action_button.clicked.connect(self.install_package)
-        
-        button_layout.addWidget(self.action_button)
+
+            button_layout.addWidget(self.action_button)
+
         button_layout.addStretch()
         
         layout.addLayout(info_layout, 3)
@@ -124,15 +133,23 @@ class PackageWidget(QFrame):
     def uninstall_package(self):
         """Request package uninstallation"""
         self.uninstall_requested.emit(self.package["id"])
+
+    def open_package(self):
+        """Request to open the installed package"""
+        self.open_requested.emit(self.package)
     
     def set_installing(self, installing=True):
         """Set installing state"""
         if installing:
             self.action_button.setText("Installing...")
             self.action_button.setEnabled(False)
+            if hasattr(self, "open_button"):
+                self.open_button.setEnabled(False)
         else:
             self.action_button.setText("Install" if not self.is_installed else "Uninstall")
             self.action_button.setEnabled(True)
+            if hasattr(self, "open_button"):
+                self.open_button.setEnabled(True)
 
 
 class SettingsDialog(QDialog):
@@ -386,6 +403,7 @@ class MainWindow(QMainWindow):
             package_widget = PackageWidget(package, is_installed, version)
             package_widget.install_requested.connect(self.install_package)
             package_widget.uninstall_requested.connect(self.uninstall_package)
+            package_widget.open_requested.connect(self.open_package)
             
             # Insert before the stretch
             self.packages_layout.insertWidget(self.packages_layout.count() - 1, package_widget)
@@ -463,6 +481,20 @@ class MainWindow(QMainWindow):
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"Uninstall failed: {str(e)}")
                 self.log_event(f"[ERROR] Uninstall failed: {str(e)}")
+
+    def open_package(self, package):
+        """Open an installed package"""
+        try:
+            success = self.package_manager.open_package(package)
+            if success:
+                self.status_bar.showMessage(f"Opened {package['name']}")
+                self.log_event(f"[ACTION] Opened {package['name']}")
+            else:
+                QMessageBox.warning(self, "Open Failed", "Failed to launch the application.")
+                self.log_event(f"[ERROR] Failed to open {package['id']}")
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to open package: {str(e)}")
+            self.log_event(f"[ERROR] Failed to open {package['id']}: {str(e)}")
 
     def update_progress(self, progress, message):
         """Update progress bar and status"""

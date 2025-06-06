@@ -24,62 +24,27 @@ class PackageManager:
         install_path = install_dir or self.config.get("install_directory")
         self.install_dir = Path(install_path)
         self.install_dir.mkdir(exist_ok=True)
-        self.packages_config_dir = Path(__file__).parent.parent / "packages" / "configs"
+
+        # When bundled with PyInstaller, data files are located inside
+        # `sys._MEIPASS`. Fall back to the repository path in development.
+        base_path = Path(getattr(sys, "_MEIPASS", Path(__file__).parent.parent))
+        self.packages_config_dir = base_path / "packages" / "configs"
         
     def get_available_packages(self) -> List[Dict]:
         """Get list of available packages from config files"""
         packages = []
-        
-        # Built-in packages
-        builtin_packages = [
-            {
-                "name": "Discord",
-                "id": "discord",
-                "description": "Voice and text chat for gamers",
-                "type": "tar.gz",
-                "url_pattern": "https://discord.com/api/download?platform=linux&format=tar.gz",
-                "extract_method": "tar_gz",
-                "icon": "🎮",
-                "executable": "Discord"
-            },
-            {
-                "name": "Visual Studio Code",
-                "id": "vscode",
-                "description": "Code editor redefined and optimized for building modern applications",
-                "type": "deb",
-                "url_pattern": "https://code.visualstudio.com/sha/download?build=stable&os=linux-deb-x64",
-                "extract_method": "deb",
-                "icon": "💻",
-                "executable": "code"
-            },
-            {
-                "name": "Postman",
-                "id": "postman",
-                "description": "API development environment",
-                "type": "tar.gz",
-                "url_pattern": "https://dl.pstmn.io/download/latest/linux64",
-                "extract_method": "tar_gz",
-                "icon": "📮",
-                "executable": "Postman"
-            }
-        ]
-        
-        # Update packages with latest version info
-        for package in builtin_packages:
-            updated_package = self.fetcher.update_package_info(package)
-            packages.append(updated_package)
-        
-        # Load custom packages from config files
+
+        # Load packages from configuration directory
         if self.packages_config_dir.exists():
-            for config_file in self.packages_config_dir.glob("*.json"):
+            for config_file in sorted(self.packages_config_dir.glob("*.json")):
                 try:
-                    with open(config_file, 'r') as f:
+                    with open(config_file, "r") as f:
                         package_config = json.load(f)
                         updated_package = self.fetcher.update_package_info(package_config)
                         packages.append(updated_package)
                 except Exception as e:
                     print(f"Error loading package config {config_file}: {e}")
-        
+
         return packages
     
     def is_package_installed(self, package_id: str) -> bool:
@@ -293,6 +258,35 @@ Categories=Development;
             
         except Exception as e:
             print(f"Failed to create desktop shortcut: {str(e)}")
+            return False
+
+    def open_package(self, package: Dict) -> bool:
+        """Launch the executable for an installed package"""
+        package_dir = self.install_dir / package["id"]
+        if not package_dir.exists():
+            return False
+
+        executable_name = package.get("executable", package["id"])
+        executable_path = None
+
+        for root, _, files in os.walk(package_dir):
+            for file in files:
+                if file.lower() == executable_name.lower() or file.lower().startswith(executable_name.lower()):
+                    file_path = Path(root) / file
+                    if os.access(file_path, os.X_OK):
+                        executable_path = file_path
+                        break
+            if executable_path:
+                break
+
+        if not executable_path:
+            return False
+
+        try:
+            subprocess.Popen([str(executable_path)])
+            return True
+        except Exception as e:
+            print(f"Failed to open package {package['id']}: {e}")
             return False
     
     def check_for_updates(self) -> List[Dict]:

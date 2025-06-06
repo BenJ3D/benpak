@@ -44,11 +44,12 @@ build: setup
 	@echo "Building standalone executable..."
 	./$(VENV_DIR)/bin/pip install pyinstaller
 	mkdir -p $(BUILD_DIR)
-	./$(VENV_DIR)/bin/pyinstaller --onefile --windowed \
-		--name benpak \
-		--distpath $(DIST_DIR) \
-		--workpath $(BUILD_DIR) \
-		$(SRC_DIR)/main.py
+        ./$(VENV_DIR)/bin/pyinstaller --onefile --windowed \
+                --name benpak \
+                --distpath $(DIST_DIR) \
+                --workpath $(BUILD_DIR) \
+                --add-data "packages/configs:packages/configs" \
+                $(SRC_DIR)/main.py
 	@echo "Executable built in $(DIST_DIR)/benpak"
 
 # Clean build artifacts
