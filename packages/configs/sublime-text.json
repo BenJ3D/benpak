@@ -1,0 +1,10 @@
+{
+    "name": "Sublime Text",
+    "id": "sublime-text",
+    "description": "Sophisticated text editor for code, markup and prose",
+    "type": "tar.xz",
+    "url_pattern": "https://download.sublimetext.com/sublime_text_build_4180_x64.tar.xz",
+    "extract_method": "tar_gz",
+    "icon": "📝",
+    "executable": "sublime_text"
+}

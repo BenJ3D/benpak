@@ -1,0 +1,11 @@
+{
+    "name": "OBS Studio",
+    "id": "obs-studio",
+    "description": "Free and open source software for video recording and live streaming",
+    "type": "AppImage",
+    "url_pattern": "https://github.com/obsproject/obs-studio/releases/latest/download/OBS-Studio-x86_64.AppImage",
+    "extract_method": "appimage",
+    "icon": "🎥",
+    "executable": "obs",
+    "github_repo": "obsproject/obs-studio"
+}

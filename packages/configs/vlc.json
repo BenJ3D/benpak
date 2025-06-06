@@ -1,0 +1,10 @@
+{
+    "name": "VLC Media Player",
+    "id": "vlc",
+    "description": "Free and open source cross-platform multimedia player",
+    "type": "AppImage",
+    "url_pattern": "https://download.videolan.org/pub/videolan/vlc/last/vlc-3.0.20-x86_64.AppImage",
+    "extract_method": "appimage",
+    "icon": "🎬",
+    "executable": "vlc"
+}

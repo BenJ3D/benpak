@@ -1,0 +1,5 @@
+requests>=2.31.0
+PyQt5>=5.15.7
+pyinstaller>=5.10.1
+beautifulsoup4>=4.12.2
+packaging>=23.1

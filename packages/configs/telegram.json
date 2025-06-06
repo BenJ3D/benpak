@@ -1,0 +1,10 @@
+{
+    "name": "Telegram Desktop",
+    "id": "telegram",
+    "description": "Fast and secure messaging app with end-to-end encryption",
+    "type": "tar.xz",
+    "url_pattern": "https://telegram.org/dl/desktop/linux",
+    "extract_method": "tar_gz",
+    "icon": "📱",
+    "executable": "Telegram"
+}

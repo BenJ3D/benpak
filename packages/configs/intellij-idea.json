@@ -1,0 +1,31 @@
+{
+  "id": "intellij-idea",
+  "name": "IntelliJ IDEA",
+  "description": "The leading Java and Kotlin IDE by JetBrains",
+  "category": "development",
+  "developer": "JetBrains",
+  "homepage": "https://www.jetbrains.com/idea/",
+  "license": "Community/Commercial",
+  "tags": ["ide", "java", "kotlin", "scala", "jetbrains"],
+  "version": "latest",
+  "url_pattern": "https://download.jetbrains.com/idea/ideaIC-{version}.tar.gz",
+  "archive_type": "tar.gz",
+  "extract_path": "idea-IC-*",
+  "executable_path": "bin/idea.sh",
+  "icon_path": "bin/idea.png",
+  "desktop_file": {
+    "name": "IntelliJ IDEA",
+    "comment": "The leading Java and Kotlin IDE",
+    "icon": "{install_path}/bin/idea.png",
+    "exec": "{install_path}/bin/idea.sh",
+    "categories": "Development;IDE;",
+    "mime_type": "text/x-java;text/x-kotlin;text/x-scala;"
+  },
+  "system_requirements": {
+    "min_ram": "4GB",
+    "disk_space": "3GB",
+    "arch": ["x86_64"]
+  },
+  "installation_notes": "Community Edition (free). Ultimate requires license.",
+  "featured": true
+}

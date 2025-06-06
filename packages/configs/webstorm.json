@@ -1,0 +1,31 @@
+{
+  "id": "webstorm",
+  "name": "WebStorm",
+  "description": "The smartest JavaScript IDE by JetBrains",
+  "category": "development",
+  "developer": "JetBrains",
+  "homepage": "https://www.jetbrains.com/webstorm/",
+  "license": "Commercial",
+  "tags": ["ide", "javascript", "typescript", "web", "jetbrains"],
+  "version": "latest",
+  "url_pattern": "https://download.jetbrains.com/webstorm/WebStorm-{version}.tar.gz",
+  "archive_type": "tar.gz",
+  "extract_path": "WebStorm-*",
+  "executable_path": "bin/webstorm.sh",
+  "icon_path": "bin/webstorm.png",
+  "desktop_file": {
+    "name": "WebStorm",
+    "comment": "The smartest JavaScript IDE",
+    "icon": "{install_path}/bin/webstorm.png",
+    "exec": "{install_path}/bin/webstorm.sh",
+    "categories": "Development;IDE;",
+    "mime_type": "text/javascript;text/typescript;application/json;"
+  },
+  "system_requirements": {
+    "min_ram": "4GB",
+    "disk_space": "3GB",
+    "arch": ["x86_64"]
+  },
+  "installation_notes": "Requires license or 30-day trial. Part of JetBrains suite.",
+  "featured": true
+}
