@@ -4,13 +4,29 @@ Main Window - GUI for BenPak Package Manager
 
 import sys
 import os
-from PyQt5.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
-                             QListWidget, QListWidgetItem, QPushButton, QLabel, 
-                             QProgressBar, QStatusBar, QMessageBox, QSplitter,
-                             QTextEdit, QGroupBox, QScrollArea, QFrame, QMenuBar,
-                             QMenu, QAction, QDialog, QFormLayout, QLineEdit,
-                             QCheckBox, QSpinBox, QDialogButtonBox)
-from PyQt5.QtCore import Qt, QThread, pyqtSignal, QTimer
+from PyQt5.QtWidgets import (
+    QMainWindow,
+    QWidget,
+    QVBoxLayout,
+    QHBoxLayout,
+    QPushButton,
+    QLabel,
+    QProgressBar,
+    QStatusBar,
+    QMessageBox,
+    QTextEdit,
+    QGroupBox,
+    QScrollArea,
+    QFrame,
+    QDialog,
+    QFormLayout,
+    QLineEdit,
+    QCheckBox,
+    QSpinBox,
+    QDialogButtonBox,
+    QGridLayout,
+)
+from PyQt5.QtCore import Qt, QThread, pyqtSignal, QTimer, QSize
 from PyQt5.QtGui import QFont, QPixmap, QIcon
 
 from package_manager import PackageManager
@@ -39,100 +55,107 @@ class PackageInstallWorker(QThread):
             self.finished.emit(False, str(e))
 
 
-class PackageWidget(QFrame):
-    """Widget representing a single package"""
-    
+class PackageCard(QFrame):
+    """Card widget representing a package"""
+
     install_requested = pyqtSignal(dict)
     uninstall_requested = pyqtSignal(str)
-    
-    def __init__(self, package, is_installed=False, version=None):
-        super().__init__()
+    update_requested = pyqtSignal(dict)
+    details_requested = pyqtSignal(dict)
+
+    def __init__(self, package, is_installed=False, version=None, latest_version=None, parent=None):
+        super().__init__(parent)
         self.package = package
         self.is_installed = is_installed
         self.version = version
-        
+        self.latest_version = latest_version
+
         self.setup_ui()
-    
+
     def setup_ui(self):
-        """Setup the package widget UI"""
+        """Create the card UI"""
         self.setFrameStyle(QFrame.Box)
         self.setLineWidth(1)
-        self.setStyleSheet("""
-            QFrame {
-                background-color: #404040;
-                border: 1px solid #555555;
-                border-radius: 8px;
-                margin: 5px;
-            }
-        """)
-        
-        layout = QHBoxLayout(self)
-        
-        # Package info
-        info_layout = QVBoxLayout()
-        
-        # Name and icon
-        name_layout = QHBoxLayout()
-        icon_label = QLabel(self.package.get("icon", "📦"))
-        icon_label.setFont(QFont("Arial", 16))
+        self.setFixedWidth(220)
+        self.setStyleSheet(
+            "QFrame {background-color: #404040; border: 1px solid #555555; border-radius: 8px;}"
+        )
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(8, 8, 8, 8)
+
+        # Icon
+        icon_label = QLabel()
+        icon_text = self.package.get("icon", "📦")
+        if len(icon_text) == 1:
+            icon_label.setText(icon_text)
+            icon_label.setFont(QFont("Arial", 32))
+            icon_label.setAlignment(Qt.AlignCenter)
+        else:
+            icon_label.setText(icon_text)
+        layout.addWidget(icon_label, alignment=Qt.AlignHCenter)
+
+        # Name
         name_label = QLabel(self.package["name"])
         name_label.setFont(QFont("Arial", 12, QFont.Bold))
-        
-        name_layout.addWidget(icon_label)
-        name_layout.addWidget(name_label)
-        name_layout.addStretch()
-        
-        # Description
-        desc_label = QLabel(self.package.get("description", ""))
-        desc_label.setWordWrap(True)
-        desc_label.setStyleSheet("color: #cccccc; font-size: 10px;")
-        
+        name_label.setAlignment(Qt.AlignCenter)
+        layout.addWidget(name_label)
+
         # Status
         status_text = "Installed" if self.is_installed else "Not installed"
         if self.is_installed and self.version:
             status_text += f" (v{self.version})"
-        
+        if self.is_installed and self.latest_version and self.version and self.latest_version != self.version:
+            status_text += f" → {self.latest_version}"
         status_label = QLabel(status_text)
-        status_label.setStyleSheet("color: #4a90e2; font-weight: bold;")
-        
-        info_layout.addLayout(name_layout)
-        info_layout.addWidget(desc_label)
-        info_layout.addWidget(status_label)
-        
+        status_label.setStyleSheet("color: #cccccc; font-size: 10px;")
+        status_label.setAlignment(Qt.AlignCenter)
+        layout.addWidget(status_label)
+
         # Buttons
-        button_layout = QVBoxLayout()
-        
+        btn_layout = QHBoxLayout()
+
         if self.is_installed:
-            self.action_button = QPushButton("Uninstall")
-            self.action_button.setStyleSheet("background-color: #e74c3c;")
-            self.action_button.clicked.connect(self.uninstall_package)
+            uninstall_btn = QPushButton("Remove")
+            uninstall_btn.setStyleSheet("background-color: #e74c3c;")
+            uninstall_btn.clicked.connect(self.uninstall_package)
+            btn_layout.addWidget(uninstall_btn)
+
+            if self.latest_version and self.version and self.latest_version != self.version:
+                update_btn = QPushButton("Update")
+                update_btn.setStyleSheet("background-color: #4a90e2;")
+                update_btn.clicked.connect(self.update_package)
+                btn_layout.addWidget(update_btn)
         else:
-            self.action_button = QPushButton("Install")
-            self.action_button.setStyleSheet("background-color: #27ae60;")
-            self.action_button.clicked.connect(self.install_package)
-        
-        button_layout.addWidget(self.action_button)
-        button_layout.addStretch()
-        
-        layout.addLayout(info_layout, 3)
-        layout.addLayout(button_layout, 1)
-    
+            install_btn = QPushButton("Install")
+            install_btn.setStyleSheet("background-color: #27ae60;")
+            install_btn.clicked.connect(self.install_package)
+            btn_layout.addWidget(install_btn)
+
+        layout.addLayout(btn_layout)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self.details_requested.emit(self.package)
+        super().mousePressEvent(event)
+
     def install_package(self):
-        """Request package installation"""
         self.install_requested.emit(self.package)
-    
+
     def uninstall_package(self):
-        """Request package uninstallation"""
         self.uninstall_requested.emit(self.package["id"])
-    
+
+    def update_package(self):
+        self.update_requested.emit(self.package)
+
     def set_installing(self, installing=True):
-        """Set installing state"""
         if installing:
-            self.action_button.setText("Installing...")
-            self.action_button.setEnabled(False)
+            for btn in self.findChildren(QPushButton):
+                btn.setEnabled(False)
+                btn.setText("...")
         else:
-            self.action_button.setText("Install" if not self.is_installed else "Uninstall")
-            self.action_button.setEnabled(True)
+            for btn in self.findChildren(QPushButton):
+                btn.setEnabled(True)
 
 
 class SettingsDialog(QDialog):
@@ -323,8 +346,8 @@ class MainWindow(QMainWindow):
         scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         
         self.packages_widget = QWidget()
-        self.packages_layout = QVBoxLayout(self.packages_widget)
-        self.packages_layout.addStretch()
+        self.packages_layout = QGridLayout(self.packages_widget)
+        self.packages_layout.setSpacing(10)
         
         scroll_area.setWidget(self.packages_widget)
         packages_layout.addWidget(scroll_area)
@@ -375,20 +398,25 @@ class MainWindow(QMainWindow):
         # Clear existing widgets
         for i in reversed(range(self.packages_layout.count())):
             child = self.packages_layout.itemAt(i).widget()
-            if child and isinstance(child, PackageWidget):
+            if child and isinstance(child, PackageCard):
                 child.setParent(None)
         
         # Add package widgets
-        for package in packages:
+        cols = max(1, self.width() // 240)
+        for idx, package in enumerate(packages):
             is_installed = self.package_manager.is_package_installed(package["id"])
             version = self.package_manager.get_installed_version(package["id"])
-            
-            package_widget = PackageWidget(package, is_installed, version)
-            package_widget.install_requested.connect(self.install_package)
-            package_widget.uninstall_requested.connect(self.uninstall_package)
-            
-            # Insert before the stretch
-            self.packages_layout.insertWidget(self.packages_layout.count() - 1, package_widget)
+
+            latest_version = package.get("latest_version")
+            package_card = PackageCard(package, is_installed, version, latest_version)
+            package_card.install_requested.connect(self.install_package)
+            package_card.uninstall_requested.connect(self.uninstall_package)
+            package_card.update_requested.connect(self.install_package)
+            package_card.details_requested.connect(self.show_package_details)
+
+            row = idx // cols
+            col = idx % cols
+            self.packages_layout.addWidget(package_card, row, col)
     
     def filter_packages(self, search_text):
         """Filter packages based on search text"""
@@ -428,7 +456,7 @@ class MainWindow(QMainWindow):
         # Find the package widget and set it to installing state
         for i in range(self.packages_layout.count()):
             widget = self.packages_layout.itemAt(i).widget()
-            if isinstance(widget, PackageWidget) and widget.package["id"] == package["id"]:
+            if isinstance(widget, PackageCard) and widget.package["id"] == package["id"]:
                 widget.set_installing(True)
                 break
         
@@ -488,7 +516,7 @@ class MainWindow(QMainWindow):
         # Reset package widget states
         for i in range(self.packages_layout.count()):
             widget = self.packages_layout.itemAt(i).widget()
-            if isinstance(widget, PackageWidget):
+            if isinstance(widget, PackageCard):
                 widget.set_installing(False)
 
     def open_settings(self):
@@ -536,3 +564,30 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Error", f"Failed to check for updates: {str(e)}")
             self.status_bar.showMessage("Update check failed")
             self.log_event(f"[ERROR] Update check failed: {str(e)}")
+
+    def show_package_details(self, package):
+        """Display package information in a dialog"""
+        dialog = QDialog(self)
+        dialog.setWindowTitle(package.get("name", "Package"))
+        layout = QVBoxLayout(dialog)
+
+        name = QLabel(package.get("name", ""))
+        name.setFont(QFont("Arial", 14, QFont.Bold))
+        layout.addWidget(name, alignment=Qt.AlignCenter)
+
+        desc = QLabel(package.get("description", ""))
+        desc.setWordWrap(True)
+        layout.addWidget(desc)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Close)
+        buttons.rejected.connect(dialog.reject)
+        buttons.accepted.connect(dialog.accept)
+        layout.addWidget(buttons)
+
+        dialog.exec_()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        # Redisplay packages to adjust grid columns on resize
+        if self.all_packages:
+            self.display_packages(self.all_packages)
