@@ -12,7 +12,9 @@ build/
 dist/
 *.egg-info/
 .eggs/
+# Exclude PyInstaller generated spec files but keep our main spec
 *.spec
+!benpak.spec
 
 # Installer logs
 pip-log.txt

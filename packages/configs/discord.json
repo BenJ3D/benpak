@@ -1,0 +1,10 @@
+{
+    "name": "Discord",
+    "id": "discord",
+    "description": "Voice and text chat for gamers",
+    "type": "tar.gz",
+    "url_pattern": "https://discord.com/api/download?platform=linux&format=tar.gz",
+    "extract_method": "tar_gz",
+    "icon": "🎮",
+    "executable": "Discord"
+}

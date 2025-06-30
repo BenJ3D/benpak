@@ -44,17 +44,15 @@ build: setup
 	@echo "Building standalone executable..."
 	./$(VENV_DIR)/bin/pip install pyinstaller
 	mkdir -p $(BUILD_DIR)
-	./$(VENV_DIR)/bin/pyinstaller --onefile --windowed \
-		--name benpak \
+	./$(VENV_DIR)/bin/pyinstaller benpak.spec \
 		--distpath $(DIST_DIR) \
-		--workpath $(BUILD_DIR) \
-		$(SRC_DIR)/main.py
+		--workpath $(BUILD_DIR)
 	@echo "Executable built in $(DIST_DIR)/benpak"
 
 # Clean build artifacts
 .PHONY: clean
 clean:
-	rm -rf $(BUILD_DIR) $(DIST_DIR) *.spec
+	rm -rf $(BUILD_DIR) $(DIST_DIR)
 	find . -type d -name "__pycache__" -exec rm -rf {} +
 	find . -type f -name "*.pyc" -delete
 
@@ -96,13 +94,33 @@ dist-package: build
 	@echo "Creating distribution package..."
 	mkdir -p dist/benpak-distribution
 	cp $(DIST_DIR)/benpak dist/benpak-distribution/
+	# Copy packages directory for user extensibility
+	cp -r packages dist/benpak-distribution/
 	echo "#!/bin/bash" > dist/benpak-distribution/install.sh
 	echo "# BenPak Installation Script" >> dist/benpak-distribution/install.sh
+	echo "" >> dist/benpak-distribution/install.sh
+	echo "echo \"Installing BenPak...\"" >> dist/benpak-distribution/install.sh
+	echo "" >> dist/benpak-distribution/install.sh
+	echo "# Créer les répertoires" >> dist/benpak-distribution/install.sh
 	echo "mkdir -p ~/Programs/benpak" >> dist/benpak-distribution/install.sh
+	echo "mkdir -p ~/Programs/benpak/packages/configs" >> dist/benpak-distribution/install.sh
+	echo "" >> dist/benpak-distribution/install.sh
+	echo "# Copier l'exécutable" >> dist/benpak-distribution/install.sh
 	echo "cp benpak ~/Programs/benpak/" >> dist/benpak-distribution/install.sh
 	echo "chmod +x ~/Programs/benpak/benpak" >> dist/benpak-distribution/install.sh
-	echo "echo 'BenPak installed successfully in ~/Programs/benpak/'" >> dist/benpak-distribution/install.sh
-	echo "echo 'Run: ~/Programs/benpak/benpak'" >> dist/benpak-distribution/install.sh
+	echo "" >> dist/benpak-distribution/install.sh
+	echo "# Copier les fichiers de packages (s'ils existent)" >> dist/benpak-distribution/install.sh
+	echo "if [ -d \"packages\" ]; then" >> dist/benpak-distribution/install.sh
+	echo "    cp -r packages/* ~/Programs/benpak/packages/" >> dist/benpak-distribution/install.sh
+	echo "    echo \"Package configurations copied\"" >> dist/benpak-distribution/install.sh
+	echo "fi" >> dist/benpak-distribution/install.sh
+	echo "" >> dist/benpak-distribution/install.sh
+	echo "echo \"BenPak installed successfully in ~/Programs/benpak/\"" >> dist/benpak-distribution/install.sh
+	echo "echo \"\"" >> dist/benpak-distribution/install.sh
+	echo "echo \"To add new packages, simply drop JSON files into:\"" >> dist/benpak-distribution/install.sh
+	echo "echo \"~/Programs/benpak/packages/configs/\"" >> dist/benpak-distribution/install.sh
+	echo "echo \"\"" >> dist/benpak-distribution/install.sh
+	echo "echo \"Run: ~/Programs/benpak/benpak\"" >> dist/benpak-distribution/install.sh
 	chmod +x dist/benpak-distribution/install.sh
 	cp README.md dist/benpak-distribution/README.txt
 	@echo "Distribution package created in dist/benpak-distribution/"

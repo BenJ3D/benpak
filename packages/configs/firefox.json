@@ -2,9 +2,9 @@
     "name": "Firefox",
     "id": "firefox",
     "description": "Free and open-source web browser developed by Mozilla",
-    "type": "tar.bz2",
+    "type": "tar.xz",
     "url_pattern": "https://download.mozilla.org/?product=firefox-latest&os=linux64&lang=en-US",
-    "extract_method": "tar_gz",
+    "extract_method": "tar_xz",
     "icon": "🦊",
     "executable": "firefox"
 }

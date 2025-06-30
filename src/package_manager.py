@@ -13,6 +13,10 @@ from packaging import version
 import json
 from config import Config
 from fetcher import PackageFetcher
+import sys
+
+from fetcher import PackageFetcher
+import sys
 
 
 class PackageManager:
@@ -24,52 +28,23 @@ class PackageManager:
         install_path = install_dir or self.config.get("install_directory")
         self.install_dir = Path(install_path)
         self.install_dir.mkdir(exist_ok=True)
-        self.packages_config_dir = Path(__file__).parent.parent / "packages" / "configs"
+        
+        # Chemin vers les packages JSON : priorité aux fichiers locaux, puis développement
+        # 1. Cherche d'abord dans ~/Programs/benpak/packages/configs (après installation)
+        local_packages_dir = Path.home() / "Programs" / "benpak" / "packages" / "configs"
+        # 2. Puis dans le dossier de développement
+        dev_packages_dir = Path(__file__).parent.parent / "packages" / "configs"
+        
+        if local_packages_dir.exists():
+            self.packages_config_dir = local_packages_dir
+        else:
+            self.packages_config_dir = dev_packages_dir
         
     def get_available_packages(self) -> List[Dict]:
         """Get list of available packages from config files"""
         packages = []
         
-        # Built-in packages
-        builtin_packages = [
-            {
-                "name": "Discord",
-                "id": "discord",
-                "description": "Voice and text chat for gamers",
-                "type": "tar.gz",
-                "url_pattern": "https://discord.com/api/download?platform=linux&format=tar.gz",
-                "extract_method": "tar_gz",
-                "icon": "🎮",
-                "executable": "Discord"
-            },
-            {
-                "name": "Visual Studio Code",
-                "id": "vscode",
-                "description": "Code editor redefined and optimized for building modern applications",
-                "type": "deb",
-                "url_pattern": "https://code.visualstudio.com/sha/download?build=stable&os=linux-deb-x64",
-                "extract_method": "deb",
-                "icon": "💻",
-                "executable": "code"
-            },
-            {
-                "name": "Postman",
-                "id": "postman",
-                "description": "API development environment",
-                "type": "tar.gz",
-                "url_pattern": "https://dl.pstmn.io/download/latest/linux64",
-                "extract_method": "tar_gz",
-                "icon": "📮",
-                "executable": "Postman"
-            }
-        ]
-        
-        # Update packages with latest version info
-        for package in builtin_packages:
-            updated_package = self.fetcher.update_package_info(package)
-            packages.append(updated_package)
-        
-        # Load custom packages from config files
+        # Load packages from JSON configuration files
         if self.packages_config_dir.exists():
             for config_file in self.packages_config_dir.glob("*.json"):
                 try:
@@ -79,6 +54,8 @@ class PackageManager:
                         packages.append(updated_package)
                 except Exception as e:
                     print(f"Error loading package config {config_file}: {e}")
+        else:
+            print(f"Warning: Package config directory not found: {self.packages_config_dir}")
         
         return packages
     
@@ -147,6 +124,18 @@ class PackageManager:
                 # Extract tar.gz file
                 subprocess.run([
                     "tar", "-xzf", file_path, "-C", str(package_dir), "--strip-components=1"
+                ], check=True)
+                
+            elif package["extract_method"] == "tar_bz2":
+                # Extract tar.bz2 file
+                subprocess.run([
+                    "tar", "-xjf", file_path, "-C", str(package_dir), "--strip-components=1"
+                ], check=True)
+                
+            elif package["extract_method"] == "tar_xz":
+                # Extract tar.xz file
+                subprocess.run([
+                    "tar", "-xJf", file_path, "-C", str(package_dir), "--strip-components=1"
                 ], check=True)
                 
             elif package["extract_method"] == "deb":
