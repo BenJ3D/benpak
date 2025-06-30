@@ -954,3 +954,73 @@ Categories=Development;
         except Exception as e:
             print(f"❌ Force uninstall failed: {str(e)}")
             return False
+    
+    def launch_package(self, package_id: str) -> bool:
+        """Launch an installed package"""
+        try:
+            # Get package info
+            packages = self.get_available_packages()
+            package = None
+            for pkg in packages:
+                if pkg["id"] == package_id:
+                    package = pkg
+                    break
+            
+            if not package:
+                print(f"❌ Package {package_id} not found")
+                return False
+            
+            if not self.is_package_installed(package_id):
+                print(f"❌ Package {package_id} is not installed")
+                return False
+            
+            # Find the executable
+            install_path = self.install_dir / package_id
+            executable_name = package.get("executable", package_id)
+            
+            # Try different common locations for the executable
+            possible_paths = [
+                install_path / executable_name,
+                install_path / "bin" / executable_name,
+                install_path / f"{executable_name}.AppImage",
+                install_path / f"{package_id}.AppImage",
+            ]
+            
+            # For specific packages, use known paths
+            if package_id == "vscode":
+                possible_paths.extend([
+                    install_path / "bin" / "code",
+                    install_path / "code",
+                    Path("/usr/bin/code"),  # If installed via deb
+                ])
+            elif package_id == "discord":
+                possible_paths.extend([
+                    install_path / "Discord",
+                    install_path / "discord",
+                ])
+            
+            executable_path = None
+            for path in possible_paths:
+                if path.exists() and path.is_file():
+                    # Check if it's executable
+                    if os.access(path, os.X_OK):
+                        executable_path = path
+                        break
+            
+            if not executable_path:
+                print(f"❌ Executable not found for {package_id}")
+                print(f"   Searched in: {[str(p) for p in possible_paths]}")
+                return False
+            
+            # Launch the application in the background
+            print(f"🚀 Launching {package['name']} from {executable_path}")
+            subprocess.Popen([str(executable_path)], 
+                           cwd=str(install_path),
+                           stdout=subprocess.DEVNULL, 
+                           stderr=subprocess.DEVNULL)
+            
+            return True
+            
+        except Exception as e:
+            print(f"❌ Failed to launch {package_id}: {str(e)}")
+            return False

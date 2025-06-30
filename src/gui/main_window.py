@@ -44,6 +44,7 @@ class PackageWidget(QFrame):
     
     install_requested = pyqtSignal(dict)
     uninstall_requested = pyqtSignal(str)
+    launch_requested = pyqtSignal(str)
     
     def __init__(self, package, is_installed=False, version=None):
         super().__init__()
@@ -65,44 +66,50 @@ class PackageWidget(QFrame):
                 margin: 5px;
             }
         """)
-        
+
         layout = QHBoxLayout(self)
-        
+
         # Package info
         info_layout = QVBoxLayout()
-        
+
         # Name and icon
         name_layout = QHBoxLayout()
         icon_label = QLabel(self.package.get("icon", "📦"))
         icon_label.setFont(QFont("Arial", 16))
         name_label = QLabel(self.package["name"])
         name_label.setFont(QFont("Arial", 12, QFont.Bold))
-        
+
         name_layout.addWidget(icon_label)
         name_layout.addWidget(name_label)
         name_layout.addStretch()
-        
+
         # Description
         desc_label = QLabel(self.package.get("description", ""))
         desc_label.setWordWrap(True)
         desc_label.setStyleSheet("color: #cccccc; font-size: 10px;")
-        
+
         # Status
         status_text = "Installed" if self.is_installed else "Not installed"
         if self.is_installed and self.version:
             status_text += f" (v{self.version})"
-        
+
         status_label = QLabel(status_text)
         status_label.setStyleSheet("color: #4a90e2; font-weight: bold;")
-        
+
         info_layout.addLayout(name_layout)
         info_layout.addWidget(desc_label)
         info_layout.addWidget(status_label)
-        
+
         # Buttons
         button_layout = QVBoxLayout()
-        
+
         if self.is_installed:
+            # Launch button
+            self.launch_button = QPushButton("Lancer")
+            self.launch_button.setStyleSheet("background-color: #2980b9; color: white;")
+            self.launch_button.clicked.connect(self.launch_package)
+            button_layout.addWidget(self.launch_button)
+
             self.action_button = QPushButton("Uninstall")
             self.action_button.setStyleSheet("background-color: #e74c3c;")
             self.action_button.clicked.connect(self.uninstall_package)
@@ -110,12 +117,16 @@ class PackageWidget(QFrame):
             self.action_button = QPushButton("Install")
             self.action_button.setStyleSheet("background-color: #27ae60;")
             self.action_button.clicked.connect(self.install_package)
-        
+
         button_layout.addWidget(self.action_button)
         button_layout.addStretch()
-        
+
         layout.addLayout(info_layout, 3)
         layout.addLayout(button_layout, 1)
+
+    def launch_package(self):
+        """Request to launch the application"""
+        self.launch_requested.emit(self.package["id"])
     
     def install_package(self):
         """Request package installation"""
@@ -140,64 +151,79 @@ class SettingsDialog(QDialog):
     
     def __init__(self, config, parent=None):
         super().__init__(parent)
+        self.setWindowTitle("Settings")
         self.config = config
-        self.setup_ui()
-    
-    def setup_ui(self):
-        """Setup the settings dialog UI"""
-        self.setWindowTitle("BenPak Settings")
-        self.setModal(True)
         self.resize(400, 300)
-        
+
         layout = QVBoxLayout(self)
-        
+
         # Form layout for settings
         form_layout = QFormLayout()
-        
+
         # Install directory
-        self.install_dir_edit = QLineEdit(self.config.get("install_directory"))
+        self.old_install_dir = self.config.get("install_directory")
+        self.install_dir_edit = QLineEdit(self.old_install_dir)
         form_layout.addRow("Install Directory:", self.install_dir_edit)
-        
+
         # Create desktop shortcuts
         self.shortcuts_checkbox = QCheckBox()
         self.shortcuts_checkbox.setChecked(self.config.get("create_desktop_shortcuts"))
         form_layout.addRow("Create Desktop Shortcuts:", self.shortcuts_checkbox)
-        
+
         # Auto refresh interval
         self.refresh_spinbox = QSpinBox()
         self.refresh_spinbox.setRange(10, 300)
         self.refresh_spinbox.setValue(self.config.get("auto_refresh_interval"))
         self.refresh_spinbox.setSuffix(" seconds")
         form_layout.addRow("Auto Refresh Interval:", self.refresh_spinbox)
-        
+
         # Download timeout
         self.timeout_spinbox = QSpinBox()
         self.timeout_spinbox.setRange(10, 120)
         self.timeout_spinbox.setValue(self.config.get("download_timeout"))
         self.timeout_spinbox.setSuffix(" seconds")
         form_layout.addRow("Download Timeout:", self.timeout_spinbox)
-        
+
         # Check updates on startup
         self.updates_checkbox = QCheckBox()
         self.updates_checkbox.setChecked(self.config.get("check_updates_on_startup"))
         form_layout.addRow("Check Updates on Startup:", self.updates_checkbox)
-        
+
         layout.addLayout(form_layout)
-        
+
         # Buttons
         button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         button_box.accepted.connect(self.accept)
         button_box.rejected.connect(self.reject)
         layout.addWidget(button_box)
-    
+
     def accept(self):
-        """Save settings and close dialog"""
-        self.config.set("install_directory", self.install_dir_edit.text())
+        """Save settings and close dialog, handle install dir change"""
+        new_install_dir = self.install_dir_edit.text()
         self.config.set("create_desktop_shortcuts", self.shortcuts_checkbox.isChecked())
         self.config.set("auto_refresh_interval", self.refresh_spinbox.value())
         self.config.set("download_timeout", self.timeout_spinbox.value())
         self.config.set("check_updates_on_startup", self.updates_checkbox.isChecked())
-        super().accept()
+
+        if new_install_dir != self.old_install_dir:
+            from PyQt5.QtWidgets import QMessageBox
+            msg = ("Le répertoire d'installation a été modifié. Les applications non désinstallées dans l'ancien répertoire n'apparaîtront plus dans le programme.\n\n"
+                   "Voulez-vous redémarrer l'application maintenant pour appliquer le changement ?")
+            reply = QMessageBox.question(self, "Redémarrage nécessaire", msg, QMessageBox.Yes | QMessageBox.No)
+            self.config.set("install_directory", new_install_dir)
+            if reply == QMessageBox.Yes:
+                self.restart_app()
+            else:
+                super().accept()
+        else:
+            self.config.set("install_directory", new_install_dir)
+            super().accept()
+
+    def restart_app(self):
+        """Restart the application"""
+        import sys, os
+        python = sys.executable
+        os.execl(python, python, *sys.argv)
 
 
 class MainWindow(QMainWindow):
@@ -386,6 +412,7 @@ class MainWindow(QMainWindow):
             package_widget = PackageWidget(package, is_installed, version)
             package_widget.install_requested.connect(self.install_package)
             package_widget.uninstall_requested.connect(self.uninstall_package)
+            package_widget.launch_requested.connect(self.launch_package)
             
             # Insert before the stretch
             self.packages_layout.insertWidget(self.packages_layout.count() - 1, package_widget)
@@ -488,7 +515,7 @@ class MainWindow(QMainWindow):
             remaining_processes = self.package_manager._find_running_processes(package_id)
             if remaining_processes:
                 proc_names = [proc.get('name', 'Unknown') for proc in remaining_processes]
-                msg = f"Certains processus sont encore en cours après le kill :\n{', '.join(proc_names)}\n\nLa désinstallation ne peut pas continuer."
+                msg = f"Certains processus sont encore en cours après le kill : {', '.join(proc_names)}\n\nLa désinstallation ne peut pas continuer."
                 QMessageBox.critical(self, "Processus toujours actifs", msg)
                 self.status_bar.showMessage("Désinstallation annulée - processus toujours actifs")
                 self.log_event(f"[ERROR] Processus toujours actifs après kill : {', '.join(proc_names)}")
@@ -585,3 +612,33 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Error", f"Failed to check for updates: {str(e)}")
             self.status_bar.showMessage("Update check failed")
             self.log_event(f"[ERROR] Update check failed: {str(e)}")
+
+    def launch_package(self, package_id):
+        """Launch an installed application from the package manager"""
+        try:
+            result = self.package_manager.launch_package(package_id)
+            if result is True or result is None:
+                self.status_bar.showMessage(f"Lancement de {package_id}...")
+                self.log_event(f"[ACTION] Lancement de {package_id} demandé.")
+            else:
+                # If launch_package returns a message or error
+                QMessageBox.warning(self, "Erreur", str(result))
+                self.log_event(f"[ERROR] Lancement échoué : {result}")
+        except Exception as e:
+            QMessageBox.critical(self, "Erreur", f"Erreur lors du lancement : {str(e)}")
+            self.log_event(f"[ERROR] Exception lors du lancement : {str(e)}")
+
+    def apply_quick_filter(self, filter_type):
+        """Apply quick filter to packages"""
+        if filter_type == "all":
+            filtered_packages = self.all_packages
+        else:
+            # Filter packages by category
+            filtered_packages = []
+            for package in self.all_packages:
+                category = package.get("category", "").lower()
+                if filter_type.lower() in category:
+                    filtered_packages.append(package)
+        
+        self.display_packages(filtered_packages)
+        self.status_bar.showMessage(f"Filtered by: {filter_type} ({len(filtered_packages)} packages)")
