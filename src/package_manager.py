@@ -243,27 +243,78 @@ exec ./{appimage_name} "$@"
                 progress_callback(0, f"Error: {str(e)}")
             raise e
     
-    def uninstall_package(self, package_id: str) -> bool:
-        """Uninstall a package"""
+    def uninstall_package(self, package_id: str, force_kill: bool = False) -> bool:
+        """Uninstall a package, with option to kill running processes"""
         package_dir = self.install_dir / package_id
         
-        if package_dir.exists():
-            try:
-                # Remove PATH symlink
-                self.remove_path_symlink(package_id)
-                
-                # Remove desktop shortcut
-                desktop_file = Path.home() / ".local" / "share" / "applications" / f"{package_id}.desktop"
-                if desktop_file.exists():
-                    desktop_file.unlink()
-                
-                # Remove package directory
-                shutil.rmtree(package_dir)
-                return True
-            except Exception as e:
-                raise Exception(f"Failed to uninstall package: {str(e)}")
+        if not package_dir.exists():
+            return False
         
-        return False
+        try:
+            # Check if the application is running
+            running_processes = self._find_running_processes(package_id)
+            
+            if running_processes and not force_kill:
+                # Application is running, ask user what to do
+                print(f"\n⚠️  {package_id} is currently running:")
+                for proc in running_processes:
+                    print(f"   - PID {proc['pid']}: {proc['name']} ({proc['exe']})")
+                
+                choice = input("\nChoose an action:\n1. Kill the application and continue uninstall\n2. Cancel uninstall\nChoice (1/2): ").strip()
+                
+                if choice == "1":
+                    if self._kill_application_processes(running_processes):
+                        print("✅ Application processes terminated successfully")
+                        # Wait a moment for processes to fully terminate
+                        import time
+                        time.sleep(2)
+                    else:
+                        print("❌ Failed to terminate some processes")
+                        return False
+                elif choice == "2":
+                    print("Uninstall cancelled by user")
+                    return False
+                else:
+                    print("Invalid choice, cancelling uninstall")
+                    return False
+            
+            elif running_processes and force_kill:
+                # Force kill without asking
+                print(f"🔄 Force killing {package_id} processes...")
+                self._kill_application_processes(running_processes)
+                import time
+                time.sleep(2)
+            
+            # Proceed with uninstallation
+            # Remove PATH symlink
+            self.remove_path_symlink(package_id)
+            
+            # Remove desktop shortcut
+            desktop_file = Path.home() / ".local" / "share" / "applications" / f"{package_id}-BP.desktop"
+            if desktop_file.exists():
+                desktop_file.unlink()
+            
+            # Also check for old format desktop shortcut
+            old_desktop_file = Path.home() / ".local" / "share" / "applications" / f"{package_id}.desktop"
+            if old_desktop_file.exists():
+                old_desktop_file.unlink()
+            
+            # Remove package directory
+            shutil.rmtree(package_dir)
+            print(f"✅ {package_id} uninstalled successfully")
+            return True
+            
+        except PermissionError as e:
+            # Check again for running processes if we get permission error
+            running_processes = self._find_running_processes(package_id)
+            if running_processes:
+                print(f"\n❌ Permission denied - {package_id} is still running:")
+                for proc in running_processes:
+                    print(f"   - PID {proc['pid']}: {proc['name']}")
+                print("Please close the application manually and try again, or use force_kill=True")
+            raise Exception(f"Permission denied while uninstalling {package_id}: {str(e)}")
+        except Exception as e:
+            raise Exception(f"Failed to uninstall {package_id}: {str(e)}")
     
     def create_desktop_shortcut(self, package: Dict) -> bool:
         """Create desktop shortcut for installed package, with icon discovery"""
@@ -794,4 +845,112 @@ Categories=Development;
             
         except Exception as e:
             print(f"Failed to remove from {config_file}: {str(e)}")
+            return False
+    
+    def _find_running_processes(self, package_id: str) -> List[Dict]:
+        """Find running processes related to the package (robuste, multi-cas)"""
+        import psutil
+        running_processes = []
+        package_dir = str(self.install_dir / package_id)
+        package_dir_real = os.path.realpath(package_dir)
+        exe_names = set()
+
+        # Collect all executable file names in the package dir
+        for root, dirs, files in os.walk(package_dir):
+            for file in files:
+                file_path = os.path.join(root, file)
+                if os.access(file_path, os.X_OK) and not file_path.endswith(('.desktop', '.txt', '.md', '.log')):
+                    exe_names.add(os.path.basename(file_path).lower())
+
+        for proc in psutil.process_iter(['pid', 'name', 'exe', 'cmdline']):
+            try:
+                info = proc.info
+                # 1. Check if process executable path is in our package dir (realpath)
+                exe_path = info.get('exe') or ''
+                if exe_path:
+                    exe_path_real = os.path.realpath(exe_path)
+                    if package_dir in exe_path_real or package_dir_real in exe_path_real:
+                        running_processes.append({
+                            'pid': info['pid'],
+                            'name': info['name'],
+                            'exe': exe_path,
+                            'process': proc
+                        })
+                        continue
+                # 2. Check if process name matches any executable in the package
+                if info['name'] and info['name'].lower() in exe_names:
+                    running_processes.append({
+                        'pid': info['pid'],
+                        'name': info['name'],
+                        'exe': exe_path,
+                        'process': proc
+                    })
+                    continue
+                # 3. Check if command line contains the package dir
+                cmdline = info.get('cmdline') or []
+                if any(package_dir in arg or package_dir_real in arg for arg in cmdline):
+                    running_processes.append({
+                        'pid': info['pid'],
+                        'name': info['name'],
+                        'exe': exe_path,
+                        'process': proc
+                    })
+            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                continue
+            except Exception:
+                continue
+        return running_processes
+    
+    def _kill_application_processes(self, processes: List[Dict]) -> bool:
+        """Kill the specified processes"""
+        success = True
+        
+        for proc_info in processes:
+            try:
+                if proc_info['process']:
+                    # Use psutil if available
+                    proc = proc_info['process']
+                    print(f"🔄 Terminating {proc_info['name']} (PID: {proc_info['pid']})...")
+                    
+                    # Try graceful termination first
+                    proc.terminate()
+                    
+                    # Wait for process to terminate
+                    try:
+                        proc.wait(timeout=5)
+                        print(f"✅ {proc_info['name']} terminated gracefully")
+                    except:
+                        # Force kill if graceful termination fails
+                        print(f"🔧 Force killing {proc_info['name']}...")
+                        proc.kill()
+                        proc.wait(timeout=2)
+                        print(f"✅ {proc_info['name']} force killed")
+                else:
+                    # Fallback to kill command
+                    print(f"🔄 Killing process {proc_info['pid']}...")
+                    subprocess.run(['kill', str(proc_info['pid'])], check=True)
+                    print(f"✅ Process {proc_info['pid']} killed")
+                    
+            except Exception as e:
+                print(f"❌ Failed to kill {proc_info['name']} (PID: {proc_info['pid']}): {str(e)}")
+                success = False
+        
+        return success
+    
+    def uninstall_package_interactive(self, package_id: str) -> bool:
+        """Interactive uninstall with GUI-like prompts"""
+        try:
+            return self.uninstall_package(package_id, force_kill=False)
+        except Exception as e:
+            if "Permission denied" in str(e) or "running" in str(e).lower():
+                print(f"\n❌ Uninstall failed: {str(e)}")
+                return False
+            raise e
+    
+    def uninstall_package_force(self, package_id: str) -> bool:
+        """Force uninstall by killing processes without asking"""
+        try:
+            return self.uninstall_package(package_id, force_kill=True)
+        except Exception as e:
+            print(f"❌ Force uninstall failed: {str(e)}")
             return False
