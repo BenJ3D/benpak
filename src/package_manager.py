@@ -338,70 +338,77 @@ Categories=Development;
             return False
 
     def create_path_symlink(self, package: Dict) -> bool:
-        """Create symlink in ~/.local/bin for command line access"""
+        """Add executable directory to PATH directly in shell config"""
         try:
-            bin_dir = Path.home() / ".local" / "bin"
-            bin_dir.mkdir(parents=True, exist_ok=True)
-            
             package_dir = self.install_dir / package["id"]
             
             # Find executable
             executable_name = package.get("executable", package["id"])
             executable_path = None
-            for root, dirs, files in os.walk(package_dir):
-                for file in files:
-                    if file.lower() == executable_name.lower() or file.lower().startswith(executable_name.lower()):
-                        file_path = Path(root) / file
-                        if os.access(file_path, os.X_OK):
-                            executable_path = file_path
-                            break
-                if executable_path:
-                    break
+            
+            # Priority search paths for common executable locations
+            priority_paths = [
+                "bin/",
+                "usr/bin/", 
+                "usr/share/*/bin/",
+                "opt/*/bin/",
+                ""  # root directory as last resort
+            ]
+            
+            candidates = []  # Store all potential executables
+            
+            for priority_path in priority_paths:
+                search_pattern = str(package_dir / priority_path) if priority_path else str(package_dir)
+                
+                for root, dirs, files in os.walk(search_pattern):
+                    for file in files:
+                        if (file.lower() == executable_name.lower() or 
+                            file.lower().startswith(executable_name.lower())):
+                            file_path = Path(root) / file
+                            
+                            # Skip .desktop files and other non-executable formats
+                            if (file_path.suffix.lower() in ['.desktop', '.txt', '.md', '.log'] or
+                                not os.access(file_path, os.X_OK)):
+                                continue
+                            
+                            # Calculate priority score
+                            score = 0
+                            if file.lower() == executable_name.lower():
+                                score += 100  # Exact match gets highest priority
+                            if "bin" in root:
+                                score += 50   # Files in bin directories get priority
+                            if not any(suffix in file.lower() for suffix in ['-tunnel', '-cli', '-helper']):
+                                score += 25   # Main executables over helper tools
+                            
+                            candidates.append((score, file_path))
+            
+            # Choose the best candidate
+            if candidates:
+                candidates.sort(key=lambda x: x[0], reverse=True)
+                executable_path = candidates[0][1]
+                print(f"Selected executable: {executable_path} (score: {candidates[0][0]})")
             
             if not executable_path:
+                print(f"Warning: Could not find executable for {package['name']}")
                 return False
             
-            # Ajout du suffixe -bp pour le symlink
-            symlink_name = f"{package.get('executable', package['id']).lower()}-bp"
-            symlink_path = bin_dir / symlink_name
-            
-            # Remove existing symlink if it exists
-            if symlink_path.exists() or symlink_path.is_symlink():
-                symlink_path.unlink()
-            
-            # Create new symlink
-            symlink_path.symlink_to(executable_path)
-            
-            # Ensure ~/.local/bin is in PATH by updating shell configs
-            self._ensure_local_bin_in_path()
+            # Add executable directory to PATH in shell configs (if enabled)
+            if self.config.get("auto_configure_path", True):
+                executable_dir = executable_path.parent
+                self._add_app_to_path(package["id"], str(executable_dir))
             
             return True
             
         except Exception as e:
-            print(f"Failed to create PATH symlink: {str(e)}")
+            print(f"Failed to add to PATH: {str(e)}")
             return False
 
     def remove_path_symlink(self, package_id: str) -> bool:
-        """Remove symlink from ~/.local/bin when uninstalling"""
+        """Remove application path from PATH when uninstalling"""
         try:
-            bin_dir = Path.home() / ".local" / "bin"
-            
-            # Remove symlink with -bp suffix
-            for symlink in bin_dir.glob(f"*-bp"):
-                if symlink.is_symlink() and package_id.lower() in symlink.name:
-                    symlink.unlink()
-                    return True
-            
-            # Also try direct package name
-            potential_symlink = bin_dir / f"{package_id.lower()}-bp"
-            if potential_symlink.exists() or potential_symlink.is_symlink():
-                potential_symlink.unlink()
-                return True
-                
-            return False
-            
+            return self._remove_app_from_path(package_id)
         except Exception as e:
-            print(f"Failed to remove PATH symlink: {str(e)}")
+            print(f"Failed to remove from PATH: {str(e)}")
             return False
 
     def check_for_updates(self) -> List[Dict]:
@@ -463,3 +470,328 @@ Categories=Development;
             print(f"Error getting installed packages: {e}")
         
         return installed_packages
+
+    def _ensure_local_bin_in_path(self):
+        """Ensure ~/.local/bin is in PATH by updating appropriate shell config files"""
+        try:
+            bin_dir = Path.home() / ".local" / "bin"
+            bin_path_export = f'export PATH="$HOME/.local/bin:$PATH"'
+            
+            # Detect current shell and appropriate config files
+            shell_configs = self._detect_shell_configs()
+            
+            if not shell_configs:
+                print("Warning: Could not detect shell configuration files")
+                return False
+            
+            # Check if already in PATH
+            try:
+                current_path = os.environ.get('PATH', '')
+                if str(bin_dir) in current_path:
+                    return True
+            except:
+                pass
+            
+            # Add to each detected shell config
+            updated_files = []
+            for config_file, shell_name in shell_configs:
+                if self._add_path_to_shell_config(config_file, bin_path_export, shell_name):
+                    updated_files.append((config_file, shell_name))
+            
+            if updated_files:
+                print(f"Added ~/.local/bin to PATH in:")
+                for config_file, shell_name in updated_files:
+                    print(f"  - {config_file} ({shell_name})")
+                print("Please restart your terminal or run 'source <config_file>' to apply changes")
+                return True
+            
+            return False
+            
+        except Exception as e:
+            print(f"Failed to update PATH: {str(e)}")
+            return False
+    
+    def _detect_shell_configs(self) -> List[Tuple[Path, str]]:
+        """Detect which shell configuration files to update based on current shell and available files"""
+        shell_configs = []
+        home = Path.home()
+        
+        # Detect current shell from environment
+        current_shell = self._get_current_shell()
+        
+        # Priority order based on current shell
+        if current_shell == "zsh":
+            potential_configs = [
+                (home / ".zshrc", "zsh"),
+                (home / ".zprofile", "zsh"),
+                (home / ".profile", "general")
+            ]
+        elif current_shell == "bash":
+            potential_configs = [
+                (home / ".bashrc", "bash"),
+                (home / ".bash_profile", "bash"),
+                (home / ".profile", "general")
+            ]
+        elif current_shell == "fish":
+            fish_config_dir = home / ".config" / "fish"
+            potential_configs = [
+                (fish_config_dir / "config.fish", "fish"),
+                (home / ".profile", "general")
+            ]
+        else:
+            # Fallback: try common configs
+            potential_configs = [
+                (home / ".bashrc", "bash"),
+                (home / ".zshrc", "zsh"),
+                (home / ".profile", "general")
+            ]
+        
+        # Check which files exist and are writable
+        for config_file, shell_name in potential_configs:
+            if config_file.exists() and os.access(config_file, os.W_OK):
+                shell_configs.append((config_file, shell_name))
+            elif shell_name == current_shell and config_file.parent.exists():
+                # Create the config file if it doesn't exist for current shell
+                try:
+                    config_file.touch()
+                    shell_configs.append((config_file, shell_name))
+                except:
+                    pass
+        
+        return shell_configs
+    
+    def _get_current_shell(self) -> str:
+        """Detect the currently used shell"""
+        # Check user preference first
+        preferred_shell = self.config.get("preferred_shell", "auto")
+        if preferred_shell != "auto" and preferred_shell in ['bash', 'zsh', 'fish']:
+            return preferred_shell
+        
+        # Method 1: Check environment variables
+        if os.environ.get('ZSH_VERSION'):
+            return "zsh"
+        elif os.environ.get('BASH_VERSION'):
+            return "bash"
+        
+        # Method 2: Check SHELL environment variable
+        shell_path = os.environ.get('SHELL', '')
+        if shell_path:
+            shell_name = os.path.basename(shell_path)
+            if shell_name in ['zsh', 'bash', 'fish', 'sh']:
+                return shell_name
+        
+        # Method 3: Check parent process (fallback)
+        try:
+            import psutil
+            parent = psutil.Process().parent()
+            if parent:
+                parent_name = parent.name()
+                if parent_name in ['zsh', 'bash', 'fish']:
+                    return parent_name
+        except:
+            pass
+        
+        # Method 4: Try to detect from /etc/passwd (ultimate fallback)
+        try:
+            import pwd
+            user_shell = pwd.getpwuid(os.getuid()).pw_shell
+            shell_name = os.path.basename(user_shell)
+            if shell_name in ['zsh', 'bash', 'fish', 'sh']:
+                return shell_name
+        except:
+            pass
+        
+        # Default fallback
+        return "bash"
+    
+    def _add_path_to_shell_config(self, config_file: Path, path_export: str, shell_name: str) -> bool:
+        """Add PATH export to a specific shell configuration file"""
+        try:
+            # Read current content
+            content = ""
+            if config_file.exists():
+                content = config_file.read_text()
+            
+            # Check if PATH export already exists
+            if "~/.local/bin" in content or "$HOME/.local/bin" in content:
+                return False  # Already configured
+            
+            # Prepare the export line based on shell type
+            if shell_name == "fish":
+                export_line = 'set -gx PATH $HOME/.local/bin $PATH'
+                comment = "# Added by BenPak for command line access"
+            else:
+                export_line = path_export
+                comment = "# Added by BenPak for command line access"
+            
+            # Add the export to the file
+            if content and not content.endswith('\n'):
+                content += '\n'
+            
+            content += f'\n{comment}\n{export_line}\n'
+            
+            # Write back to file
+            config_file.write_text(content)
+            return True
+            
+        except Exception as e:
+            print(f"Failed to update {config_file}: {str(e)}")
+            return False
+    
+    def get_shell_info(self) -> Dict[str, any]:
+        """Get information about current shell configuration"""
+        current_shell = self._get_current_shell()
+        shell_configs = self._detect_shell_configs()
+        
+        return {
+            "current_shell": current_shell,
+            "detected_configs": [(str(path), shell) for path, shell in shell_configs],
+            "auto_configure_enabled": self.config.get("auto_configure_path", True),
+            "preferred_shell": self.config.get("preferred_shell", "auto")
+        }
+    
+    def set_shell_preference(self, shell: str, auto_configure: bool = None):
+        """Set user shell preference and auto-configure option"""
+        if shell in ["auto", "bash", "zsh", "fish"]:
+            self.config.set("preferred_shell", shell)
+        
+        if auto_configure is not None:
+            self.config.set("auto_configure_path", auto_configure)
+    
+    def manually_configure_path(self) -> bool:
+        """Manually configure PATH regardless of auto_configure setting"""
+        return self._ensure_local_bin_in_path()
+
+    def _add_app_to_path(self, package_id: str, executable_dir: str) -> bool:
+        """Add application executable directory to PATH in shell configuration files"""
+        try:
+            # Detect current shell and appropriate config files
+            shell_configs = self._detect_shell_configs()
+            
+            if not shell_configs:
+                print("Warning: Could not detect shell configuration files")
+                return False
+            
+            # Check if already in PATH
+            try:
+                current_path = os.environ.get('PATH', '')
+                if executable_dir in current_path:
+                    return True
+            except:
+                pass
+            
+            # Add to each detected shell config
+            updated_files = []
+            for config_file, shell_name in shell_configs:
+                if self._add_app_path_to_shell_config(config_file, package_id, executable_dir, shell_name):
+                    updated_files.append((config_file, shell_name))
+            
+            if updated_files:
+                print(f"Added {package_id} to PATH in:")
+                for config_file, shell_name in updated_files:
+                    print(f"  - {config_file} ({shell_name})")
+                print("Please restart your terminal or run 'source <config_file>' to apply changes")
+                return True
+            
+            return False
+            
+        except Exception as e:
+            print(f"Failed to add {package_id} to PATH: {str(e)}")
+            return False
+    
+    def _remove_app_from_path(self, package_id: str) -> bool:
+        """Remove application paths from shell configuration files"""
+        try:
+            # Detect current shell and appropriate config files
+            shell_configs = self._detect_shell_configs()
+            
+            if not shell_configs:
+                print("Warning: Could not detect shell configuration files")
+                return False
+            
+            # Remove from each detected shell config
+            updated_files = []
+            for config_file, shell_name in shell_configs:
+                if self._remove_app_path_from_shell_config(config_file, package_id):
+                    updated_files.append((config_file, shell_name))
+            
+            if updated_files:
+                print(f"Removed {package_id} from PATH in:")
+                for config_file, shell_name in updated_files:
+                    print(f"  - {config_file} ({shell_name})")
+                return True
+            
+            return False
+            
+        except Exception as e:
+            print(f"Failed to remove {package_id} from PATH: {str(e)}")
+            return False
+    
+    def _add_app_path_to_shell_config(self, config_file: Path, package_id: str, executable_dir: str, shell_name: str) -> bool:
+        """Add application PATH export to a specific shell configuration file"""
+        try:
+            # Read current content
+            content = ""
+            if config_file.exists():
+                content = config_file.read_text()
+            
+            # Check if this app's PATH export already exists
+            benpak_marker = f"# BenPak - {package_id}"
+            if benpak_marker in content:
+                return False  # Already configured
+            
+            # Prepare the export line based on shell type
+            if shell_name == "fish":
+                export_line = f'set -gx PATH "{executable_dir}" $PATH'
+                comment = f"# BenPak - {package_id}"
+            else:
+                export_line = f'export PATH="{executable_dir}:$PATH"'
+                comment = f"# BenPak - {package_id}"
+            
+            # Add the export to the file
+            if content and not content.endswith('\n'):
+                content += '\n'
+            
+            content += f'\n{comment}\n{export_line}\n'
+            
+            # Write back to file
+            config_file.write_text(content)
+            return True
+            
+        except Exception as e:
+            print(f"Failed to update {config_file}: {str(e)}")
+            return False
+    
+    def _remove_app_path_from_shell_config(self, config_file: Path, package_id: str) -> bool:
+        """Remove application PATH export from a specific shell configuration file"""
+        try:
+            if not config_file.exists():
+                return False
+            
+            content = config_file.read_text()
+            lines = content.split('\n')
+            new_lines = []
+            skip_next = False
+            
+            for line in lines:
+                # Skip the comment line and the next export line for this package
+                if f"# BenPak - {package_id}" in line:
+                    skip_next = True
+                    continue
+                elif skip_next and ("export PATH=" in line or "set -gx PATH" in line):
+                    skip_next = False
+                    continue
+                else:
+                    new_lines.append(line)
+            
+            # Write back to file if something was removed
+            new_content = '\n'.join(new_lines)
+            if new_content != content:
+                config_file.write_text(new_content)
+                return True
+            
+            return False
+            
+        except Exception as e:
+            print(f"Failed to remove from {config_file}: {str(e)}")
+            return False
