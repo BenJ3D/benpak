@@ -445,24 +445,73 @@ class MainWindow(QMainWindow):
         self.install_worker.start()
     
     def uninstall_package(self, package_id):
-        """Uninstall a package"""
-        reply = QMessageBox.question(self, "Confirm Uninstall", 
-                                   f"Are you sure you want to uninstall this package?",
-                                   QMessageBox.Yes | QMessageBox.No)
+        """Uninstall a package with process detection and GUI interaction"""
+        # 1. Check for running processes
+        try:
+            running_processes = self.package_manager._find_running_processes(package_id)
+        except Exception as e:
+            QMessageBox.critical(self, "Erreur", f"Échec de la détection des processus : {str(e)}")
+            self.log_event(f"[ERROR] Échec de la détection des processus : {str(e)}")
+            return
+
+        if running_processes:
+            # Build process info string
+            proc_lines = []
+            for proc in running_processes:
+                line = f"PID {proc.get('pid', '?')}: {proc.get('name', '?')} (cmd: {' '.join(proc.get('cmdline', []))})"
+                proc_lines.append(line)
+            proc_str = "\n".join(proc_lines)
+            msg = (f"Des processus liés à ce package sont en cours d'exécution :\n\n"
+                   f"{proc_str}\n\n"
+                   "Voulez-vous forcer la fermeture de ces processus et continuer la désinstallation ?")
+            reply = QMessageBox.question(self, "Processus en cours",
+                                        msg,
+                                        QMessageBox.Yes | QMessageBox.No)
+            if reply == QMessageBox.No:
+                self.status_bar.showMessage("Désinstallation annulée (processus en cours)")
+                self.log_event("[CANCEL] Désinstallation annulée par l'utilisateur (processus en cours)")
+                return
+            # Forcer le kill, puis attendre un délai avant retry
+            self.log_event(f"[ACTION] Killing {len(running_processes)} process(es) before uninstall...")
+            self.package_manager._kill_application_processes(running_processes)
+            self.status_bar.showMessage("Processus tués. Attente 4 secondes avant désinstallation...")
+            self.log_event("[INFO] Attente 4s pour libération des ressources système...")
+            QTimer.singleShot(4000, lambda: self._uninstall_package_final(package_id))
+        else:
+            # Aucun process bloquant, désinstaller directement
+            self._uninstall_package_final(package_id)
+
+    def _uninstall_package_final(self, package_id):
+        """Procède à la désinstallation effective après délai éventuel"""
+        # Vérifier si des processus sont encore en cours après le délai
+        try:
+            remaining_processes = self.package_manager._find_running_processes(package_id)
+            if remaining_processes:
+                proc_names = [proc.get('name', 'Unknown') for proc in remaining_processes]
+                msg = f"Certains processus sont encore en cours après le kill :\n{', '.join(proc_names)}\n\nLa désinstallation ne peut pas continuer."
+                QMessageBox.critical(self, "Processus toujours actifs", msg)
+                self.status_bar.showMessage("Désinstallation annulée - processus toujours actifs")
+                self.log_event(f"[ERROR] Processus toujours actifs après kill : {', '.join(proc_names)}")
+                return
+        except Exception as e:
+            self.log_event(f"[WARNING] Impossible de vérifier les processus restants : {str(e)}")
         
-        if reply == QMessageBox.Yes:
-            try:
-                success = self.package_manager.uninstall_package(package_id)
-                if success:
-                    self.status_bar.showMessage("Package uninstalled successfully")
-                    self.log_event(f"[ACTION] Uninstalled {package_id}.")
-                    self.refresh_packages()
-                else:
-                    QMessageBox.warning(self, "Uninstall Failed", "Failed to uninstall package")
-                    self.log_event(f"[ERROR] Failed to uninstall {package_id}.")
-            except Exception as e:
-                QMessageBox.critical(self, "Error", f"Uninstall failed: {str(e)}")
-                self.log_event(f"[ERROR] Uninstall failed: {str(e)}")
+        # Procéder à la désinstallation
+        try:
+            success = self.package_manager.uninstall_package(package_id, force_kill=True)
+            if success:
+                self.status_bar.showMessage("Désinstallation réussie")
+                QMessageBox.information(self, "Succès", "Le package a été désinstallé avec succès.")
+                self.log_event(f"[SUCCESS] {package_id} désinstallé.")
+                self.refresh_packages()
+            else:
+                self.status_bar.showMessage("Échec de la désinstallation")
+                QMessageBox.warning(self, "Échec", "La désinstallation a échoué ou le package n'était pas installé.")
+                self.log_event(f"[ERROR] Échec de la désinstallation de {package_id}.")
+        except Exception as e:
+            self.status_bar.showMessage("Erreur lors de la désinstallation")
+            QMessageBox.critical(self, "Erreur", f"Erreur lors de la désinstallation : {str(e)}")
+            self.log_event(f"[ERROR] Exception lors de la désinstallation : {str(e)}")
 
     def update_progress(self, progress, message):
         """Update progress bar and status"""
