@@ -10,8 +10,8 @@ from PyQt5.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                              QTextEdit, QGroupBox, QScrollArea, QFrame, QMenuBar,
                              QMenu, QAction, QDialog, QFormLayout, QLineEdit,
                              QCheckBox, QSpinBox, QDialogButtonBox)
-from PyQt5.QtCore import Qt, QThread, pyqtSignal, QTimer
-from PyQt5.QtGui import QFont, QPixmap, QIcon
+from PyQt5.QtCore import Qt, QThread, pyqtSignal, QTimer, QPropertyAnimation, QRect
+from PyQt5.QtGui import QFont, QPixmap, QIcon, QPainter, QPen, QColor
 
 from package_manager import PackageManager
 from config import Config
@@ -109,6 +109,10 @@ class PackageWidget(QFrame):
             self.launch_button.setStyleSheet("background-color: #2980b9; color: white;")
             self.launch_button.clicked.connect(self.launch_package)
             button_layout.addWidget(self.launch_button)
+            # Beautiful spinner (hidden by default)
+            self.spinner = SpinnerWidget()
+            self.spinner.setVisible(False)
+            button_layout.addWidget(self.spinner)
 
             self.action_button = QPushButton("Uninstall")
             self.action_button.setStyleSheet("background-color: #e74c3c;")
@@ -123,6 +127,22 @@ class PackageWidget(QFrame):
 
         layout.addLayout(info_layout, 3)
         layout.addLayout(button_layout, 1)
+
+    def set_launching(self, launching=True):
+        """Set launching state for the launch button"""
+        if hasattr(self, 'launch_button'):
+            if launching:
+                self.launch_button.setText("Lancement…")
+                self.launch_button.setEnabled(False)
+                self.launch_button.setStyleSheet("background-color: #7f8c8d; color: white;")  # Grayed out
+                if hasattr(self, 'spinner'):
+                    self.spinner.start()
+            else:
+                self.launch_button.setText("Lancer")
+                self.launch_button.setEnabled(True)
+                self.launch_button.setStyleSheet("background-color: #2980b9; color: white;")  # Back to blue
+                if hasattr(self, 'spinner'):
+                    self.spinner.stop()
 
     def launch_package(self):
         """Request to launch the application"""
@@ -224,6 +244,59 @@ class SettingsDialog(QDialog):
         import sys, os
         python = sys.executable
         os.execl(python, python, *sys.argv)
+
+
+class SpinnerWidget(QLabel):
+    """A beautiful animated spinner widget"""
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedSize(20, 20)
+        self.angle = 0
+        self.timer = QTimer()
+        self.timer.timeout.connect(self.rotate)
+        self.setStyleSheet("background: transparent;")
+        
+    def start(self):
+        """Start the spinner animation"""
+        self.timer.start(50)  # Update every 50ms for smooth animation
+        self.show()
+        
+    def stop(self):
+        """Stop the spinner animation"""
+        self.timer.stop()
+        self.hide()
+        
+    def rotate(self):
+        """Rotate the spinner"""
+        self.angle = (self.angle + 15) % 360
+        self.update()
+        
+    def paintEvent(self, event):
+        """Custom paint event for the spinner"""
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        
+        # Draw spinning dots
+        painter.translate(self.width() / 2, self.height() / 2)
+        painter.rotate(self.angle)
+        
+        for i in range(8):
+            painter.save()
+            painter.rotate(i * 45)
+            
+            # Fade effect for trailing dots
+            alpha = 255 - (i * 25)
+            if alpha < 50:
+                alpha = 50
+                
+            color = QColor(74, 144, 226, alpha)  # Blue color with alpha
+            painter.setBrush(color)
+            painter.setPen(Qt.NoPen)
+            
+            # Draw dot
+            painter.drawEllipse(6, -1, 2, 2)
+            painter.restore()
 
 
 class MainWindow(QMainWindow):
@@ -614,19 +687,36 @@ class MainWindow(QMainWindow):
             self.log_event(f"[ERROR] Update check failed: {str(e)}")
 
     def launch_package(self, package_id):
-        """Launch an installed application from the package manager"""
-        try:
-            result = self.package_manager.launch_package(package_id)
-            if result is True or result is None:
-                self.status_bar.showMessage(f"Lancement de {package_id}...")
-                self.log_event(f"[ACTION] Lancement de {package_id} demandé.")
-            else:
-                # If launch_package returns a message or error
-                QMessageBox.warning(self, "Erreur", str(result))
-                self.log_event(f"[ERROR] Lancement échoué : {result}")
-        except Exception as e:
-            QMessageBox.critical(self, "Erreur", f"Erreur lors du lancement : {str(e)}")
-            self.log_event(f"[ERROR] Exception lors du lancement : {str(e)}")
+        """Launch an installed application from the package manager, UX feedback"""
+        # Find the widget and set launching state
+        widget = None
+        for i in range(self.packages_layout.count()):
+            w = self.packages_layout.itemAt(i).widget()
+            if isinstance(w, PackageWidget) and w.package["id"] == package_id:
+                widget = w
+                break
+        if widget:
+            widget.set_launching(True)
+        self.status_bar.showMessage(f"Lancement de {package_id}...")
+        self.log_event(f"[ACTION] Lancement de {package_id} demandé.")
+        # Lancer l'appli dans un QTimer pour UX (simulateur de spinner)
+        def do_launch():
+            try:
+                result = self.package_manager.launch_package(package_id)
+                if result is True or result is None:
+                    self.status_bar.showMessage(f"{package_id} lancé.")
+                    self.log_event(f"[SUCCESS] {package_id} lancé.")
+                else:
+                    QMessageBox.warning(self, "Erreur", str(result))
+                    self.log_event(f"[ERROR] Lancement échoué : {result}")
+            except Exception as e:
+                QMessageBox.critical(self, "Erreur", f"Erreur lors du lancement : {str(e)}")
+                self.log_event(f"[ERROR] Exception lors du lancement : {str(e)}")
+            finally:
+                if widget:
+                    widget.set_launching(False)
+        # Affiche le spinner 1s minimum pour le ressenti utilisateur
+        QTimer.singleShot(1000, do_launch)
 
     def apply_quick_filter(self, filter_type):
         """Apply quick filter to packages"""
