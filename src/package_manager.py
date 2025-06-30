@@ -205,31 +205,39 @@ exec ./{appimage_name} "$@"
             raise Exception(f"Failed to extract {package['name']}: {str(e)}")
     
     def install_package(self, package: Dict, progress_callback=None) -> bool:
-        """Download and install a package"""
+        """Download and install a package, then create desktop shortcut"""
         try:
             if progress_callback:
                 progress_callback(0, "Downloading...")
-            
+
             # Download package
             file_path = self.download_package(package, 
                 lambda p: progress_callback(p * 0.7) if progress_callback else None)
-            
+
             if progress_callback:
                 progress_callback(70, "Extracting...")
-            
+
             # Extract package
             success = self.extract_package(package, file_path,
                 lambda p: progress_callback(70 + p * 0.3) if progress_callback else None)
-            
+
             # Clean up temporary file
             os.unlink(file_path)
             os.rmdir(os.path.dirname(file_path))
+
+            # Create desktop shortcut if enabled in config
+            if self.config.get("create_desktop_shortcuts", True):
+                self.create_desktop_shortcut(package)
             
+            # Create PATH symlink if enabled in config  
+            if self.config.get("create_path_symlinks", True):
+                self.create_path_symlink(package)
+
             if progress_callback:
                 progress_callback(100, "Completed!")
-            
+
             return success
-            
+
         except Exception as e:
             if progress_callback:
                 progress_callback(0, f"Error: {str(e)}")
@@ -241,6 +249,15 @@ exec ./{appimage_name} "$@"
         
         if package_dir.exists():
             try:
+                # Remove PATH symlink
+                self.remove_path_symlink(package_id)
+                
+                # Remove desktop shortcut
+                desktop_file = Path.home() / ".local" / "share" / "applications" / f"{package_id}.desktop"
+                if desktop_file.exists():
+                    desktop_file.unlink()
+                
+                # Remove package directory
                 shutil.rmtree(package_dir)
                 return True
             except Exception as e:
@@ -249,18 +266,88 @@ exec ./{appimage_name} "$@"
         return False
     
     def create_desktop_shortcut(self, package: Dict) -> bool:
-        """Create desktop shortcut for installed package"""
+        """Create desktop shortcut for installed package, with icon discovery"""
         try:
             desktop_dir = Path.home() / ".local" / "share" / "applications"
             desktop_dir.mkdir(parents=True, exist_ok=True)
+
+            package_dir = self.install_dir / package["id"]
+
+            # Find executable
+            executable_name = package.get("executable", package["id"])
+            executable_path = None
+            for root, dirs, files in os.walk(package_dir):
+                for file in files:
+                    if file.lower() == executable_name.lower() or file.lower().startswith(executable_name.lower()):
+                        file_path = Path(root) / file
+                        if os.access(file_path, os.X_OK):
+                            executable_path = file_path
+                            break
+                if executable_path:
+                    break
+            if not executable_path:
+                return False
+
+            # Try to find an icon in the package directory
+            icon_path = None
+            icon_candidates = [
+                f"{package['id']}.png", "icon.png", "Icon.png", "logo.png", "Icon.svg", "icon.svg"
+            ]
+            for candidate in icon_candidates:
+                candidate_path = package_dir / candidate
+                if candidate_path.exists():
+                    icon_path = str(candidate_path)
+                    break
+            # If not found, try to find any .png or .svg in the package dir
+            if not icon_path:
+                for file in package_dir.glob("*.png"):
+                    icon_path = str(file)
+                    break
+            if not icon_path:
+                for file in package_dir.glob("*.svg"):
+                    icon_path = str(file)
+                    break
+            # Fallback: use the icon field (emoji or name)
+            if not icon_path:
+                icon_path = package.get('icon', 'application-default-icon')
+
+            # Ajout du suffixe -BP pour le nom du raccourci et de l'icône
+            desktop_file = desktop_dir / f"{package['id']}-BP.desktop"
+            display_name = f"{package['name']}-BP"
+            # Si c'est une icône locale, on la copie avec le suffixe -BP
+            if icon_path and os.path.isfile(icon_path):
+                icon_ext = os.path.splitext(icon_path)[1]
+                icon_target = desktop_dir / f"{package['id']}-BP{icon_ext}"
+                shutil.copy2(icon_path, icon_target)
+                icon_path = str(icon_target)
+
+            desktop_content = f"""[Desktop Entry]
+Name={display_name}
+Comment={package.get('description', '')}
+Exec={executable_path}
+Icon={icon_path}
+Terminal=false
+Type=Application
+Categories=Development;
+"""
+            desktop_file.write_text(desktop_content)
+            os.chmod(desktop_file, 0o755)
+            return True
+        except Exception as e:
+            print(f"Failed to create desktop shortcut: {str(e)}")
+            return False
+
+    def create_path_symlink(self, package: Dict) -> bool:
+        """Create symlink in ~/.local/bin for command line access"""
+        try:
+            bin_dir = Path.home() / ".local" / "bin"
+            bin_dir.mkdir(parents=True, exist_ok=True)
             
             package_dir = self.install_dir / package["id"]
             
             # Find executable
             executable_name = package.get("executable", package["id"])
             executable_path = None
-            
-            # Search for executable in package directory
             for root, dirs, files in os.walk(package_dir):
                 for file in files:
                     if file.lower() == executable_name.lower() or file.lower().startswith(executable_name.lower()):
@@ -274,27 +361,49 @@ exec ./{appimage_name} "$@"
             if not executable_path:
                 return False
             
-            # Create .desktop file
-            desktop_file = desktop_dir / f"{package['id']}.desktop"
-            desktop_content = f"""[Desktop Entry]
-Name={package['name']}
-Comment={package.get('description', '')}
-Exec={executable_path}
-Icon={package.get('icon', 'application-default-icon')}
-Terminal=false
-Type=Application
-Categories=Development;
-"""
+            # Ajout du suffixe -bp pour le symlink
+            symlink_name = f"{package.get('executable', package['id']).lower()}-bp"
+            symlink_path = bin_dir / symlink_name
             
-            desktop_file.write_text(desktop_content)
-            os.chmod(desktop_file, 0o755)
+            # Remove existing symlink if it exists
+            if symlink_path.exists() or symlink_path.is_symlink():
+                symlink_path.unlink()
+            
+            # Create new symlink
+            symlink_path.symlink_to(executable_path)
+            
+            # Ensure ~/.local/bin is in PATH by updating shell configs
+            self._ensure_local_bin_in_path()
             
             return True
             
         except Exception as e:
-            print(f"Failed to create desktop shortcut: {str(e)}")
+            print(f"Failed to create PATH symlink: {str(e)}")
             return False
-    
+
+    def remove_path_symlink(self, package_id: str) -> bool:
+        """Remove symlink from ~/.local/bin when uninstalling"""
+        try:
+            bin_dir = Path.home() / ".local" / "bin"
+            
+            # Remove symlink with -bp suffix
+            for symlink in bin_dir.glob(f"*-bp"):
+                if symlink.is_symlink() and package_id.lower() in symlink.name:
+                    symlink.unlink()
+                    return True
+            
+            # Also try direct package name
+            potential_symlink = bin_dir / f"{package_id.lower()}-bp"
+            if potential_symlink.exists() or potential_symlink.is_symlink():
+                potential_symlink.unlink()
+                return True
+                
+            return False
+            
+        except Exception as e:
+            print(f"Failed to remove PATH symlink: {str(e)}")
+            return False
+
     def check_for_updates(self) -> List[Dict]:
         """Check for available updates for installed packages"""
         available_updates = []

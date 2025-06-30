@@ -32,6 +32,7 @@ class Config:
         self.default_config = {
             "install_directory": default_install_dir,
             "create_desktop_shortcuts": True,
+            "create_path_symlinks": True,
             "auto_refresh_interval": 30,
             "theme": "dark",
             "download_timeout": 30,
