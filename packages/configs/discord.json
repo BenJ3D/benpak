@@ -6,5 +6,6 @@
     "url_pattern": "https://discord.com/api/download?platform=linux&format=tar.gz",
     "extract_method": "tar_gz",
     "icon": "🎮",
-    "executable": "Discord"
+    "executable": "Discord",
+    "bin_path": "Discord"
 }

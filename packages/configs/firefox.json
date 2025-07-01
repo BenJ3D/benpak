@@ -6,5 +6,6 @@
     "url_pattern": "https://download.mozilla.org/?product=firefox-latest&os=linux64&lang=en-US",
     "extract_method": "tar_xz",
     "icon": "🦊",
-    "executable": "firefox"
+    "executable": "firefox",
+    "bin_path": ""
 }

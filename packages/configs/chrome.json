@@ -1,0 +1,11 @@
+{
+    "name": "Google Chrome",
+    "id": "chrome",
+    "description": "Web browser from Google",
+    "type": "deb",
+    "url_pattern": "https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb",
+    "extract_method": "deb",
+    "icon": "🌐",
+    "executable": "google-chrome",
+    "bin_path": "opt/google/chrome"
+}

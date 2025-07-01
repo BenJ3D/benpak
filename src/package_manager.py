@@ -75,33 +75,43 @@ class PackageManager:
         return None
     
     def download_package(self, package: Dict, progress_callback=None) -> str:
-        """Download package to temporary directory"""
+        """Download package to temporary directory, using real filename if possible and checking file type."""
+        import re
         url = package["url_pattern"]
-        
-        # Create temporary file
         temp_dir = tempfile.mkdtemp()
         filename = f"{package['id']}.{package['type'].split('.')[-1]}"
         temp_file = os.path.join(temp_dir, filename)
-        
         try:
             response = requests.get(url, stream=True)
             response.raise_for_status()
-            
+            # Try to get filename from Content-Disposition
+            content_disp = response.headers.get('content-disposition')
+            if content_disp:
+                fname_match = re.search(r'filename="?([^";]+)"?', content_disp)
+                if fname_match:
+                    real_filename = fname_match.group(1)
+                    temp_file = os.path.join(temp_dir, real_filename)
             total_size = int(response.headers.get('content-length', 0))
             downloaded = 0
-            
             with open(temp_file, 'wb') as f:
                 for chunk in response.iter_content(chunk_size=8192):
                     if chunk:
                         f.write(chunk)
                         downloaded += len(chunk)
-                        
                         if progress_callback and total_size > 0:
                             progress = int((downloaded / total_size) * 100)
                             progress_callback(progress)
-            
+            # Vérification du type de fichier téléchargé (pour tar.gz)
+            if package["extract_method"] == "tar_gz":
+                import subprocess
+                try:
+                    file_output = subprocess.check_output(["file", temp_file], text=True)
+                    if "gzip compressed data" not in file_output and "tar archive" not in file_output:
+                        raise Exception(f"Downloaded file is not a valid tar.gz archive: {file_output}")
+                except Exception as e:
+                    shutil.rmtree(temp_dir, ignore_errors=True)
+                    raise Exception(f"Failed to verify archive for {package['name']}: {str(e)}")
             return temp_file
-            
         except Exception as e:
             shutil.rmtree(temp_dir, ignore_errors=True)
             raise Exception(f"Failed to download {package['name']}: {str(e)}")
@@ -166,18 +176,26 @@ exec ./{appimage_name} "$@"
             # Create version file
             version_file = package_dir / ".version"
             try:
-                # Use latest_version if available, otherwise try to extract from filename
                 version_str = package.get('latest_version', 'unknown')
+                # Pour les paquets .deb, extraire la version réelle du fichier deb
+                if package["extract_method"] == "deb":
+                    try:
+                        deb_version = subprocess.check_output([
+                            "dpkg-deb", "-f", file_path, "Version"
+                        ], text=True).strip()
+                        if deb_version:
+                            version_str = deb_version
+                    except Exception as e:
+                        print(f"[WARN] Impossible d'extraire la version du .deb: {e}")
+                # fallback si version inconnue
                 if version_str in ['latest', 'unknown']:
                     import re
                     from datetime import datetime
-                    
                     version_match = re.search(r'(\d+\.\d+\.\d+)', os.path.basename(file_path))
                     if version_match:
                         version_str = version_match.group(1)
                     else:
                         version_str = datetime.now().strftime("%Y.%m.%d")
-                
                 version_file.write_text(version_str)
             except:
                 pass
@@ -385,6 +403,34 @@ Categories=Development;
             # Find executable
             executable_name = package.get("executable", package["id"])
             executable_path = None
+            
+            # Si bin_path est défini dans le package, on l'utilise en priorité pour le PATH
+            bin_path = package.get("bin_path")
+            if bin_path:
+                bin_path_obj = package_dir / bin_path
+                executable_name = package.get("executable", package["id"])
+                
+                # Détecter si bin_path pointe vers un fichier (se termine par le nom de l'exécutable)
+                if bin_path.endswith(executable_name):
+                    # bin_path pointe vers le fichier exécutable
+                    executable_dir = bin_path_obj.parent
+                    executable_path = bin_path_obj
+                else:
+                    # bin_path pointe vers un dossier
+                    executable_dir = bin_path_obj
+                    # Chercher l'exécutable dans le dossier bin_path
+                    potential_exec = executable_dir / executable_name
+                    if potential_exec.exists() and os.access(potential_exec, os.X_OK):
+                        executable_path = potential_exec
+                
+                # Ajouter au PATH même si le dossier n'existe pas encore
+                if self.config.get("auto_configure_path", True):
+                    self._add_app_to_path(package["id"], str(executable_dir))
+                    print(f"Added {package['name']} to PATH: {executable_dir}")
+                
+                # Si bin_path est défini, on considère que c'est suffisant
+                # même si l'exécutable n'existe pas encore
+                return True
             
             # Priority search paths for common executable locations
             priority_paths = [
@@ -780,12 +826,17 @@ Categories=Development;
             if benpak_marker in content:
                 return False  # Already configured
             
+            # Préférer le ~ pour le home dans l'export PATH
+            from pathlib import Path as _Path
+            home = str(_Path.home())
+            # Use absolute path instead of ~ to avoid expansion issues
+            exec_dir_display = executable_dir
             # Prepare the export line based on shell type
             if shell_name == "fish":
-                export_line = f'set -gx PATH "{executable_dir}" $PATH'
+                export_line = f'set -gx PATH "{exec_dir_display}" $PATH'
                 comment = f"# BenPak - {package_id}"
             else:
-                export_line = f'export PATH="{executable_dir}:$PATH"'
+                export_line = f'export PATH="{exec_dir_display}:$PATH"'
                 comment = f"# BenPak - {package_id}"
             
             # Add the export to the file
@@ -967,20 +1018,24 @@ Categories=Development;
             install_path = self.install_dir / package_id
             executable_name = package.get("executable", package_id)
             
-            # Try different common locations for the executable
-            possible_paths = [
+            # Si bin_path est défini, on commence la recherche par ce chemin
+            bin_path = package.get("bin_path")
+            possible_paths = []
+            if bin_path:
+                possible_paths.append(install_path / bin_path / executable_name)
+            possible_paths.extend([
                 install_path / executable_name,
                 install_path / "bin" / executable_name,
                 install_path / f"{executable_name}.AppImage",
                 install_path / f"{package_id}.AppImage",
-            ]
+            ])
             
             # For specific packages, use known paths
             if package_id == "vscode":
                 possible_paths.extend([
                     install_path / "bin" / "code",
                     install_path / "code",
-                    Path("/usr/bin/code"),  # If installed via deb
+                    # Ne jamais inclure /usr/bin/code pour VSCode BenPak !
                 ])
             elif package_id == "discord":
                 possible_paths.extend([

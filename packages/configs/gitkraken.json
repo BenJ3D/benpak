@@ -1,0 +1,11 @@
+{
+    "name": "GitKraken",
+    "id": "gitkraken",
+    "description": "Cross-platform Git GUI client",
+    "type": "tar.gz",
+    "url_pattern": "https://www.gitkraken.com/download/linux-gzip",
+    "extract_method": "tar_gz",
+    "icon": "🐙",
+    "executable": "gitkraken.sh",
+    "bin_path": "usr/share/gitkraken/resources/bin"
+}
