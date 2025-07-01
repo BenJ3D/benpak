@@ -7,3 +7,7 @@ Peut etre rajouter dans les json un url permettant de checker la derniere versio
 
 # continuer l'ajout de nouveau soft
 et corriger les actuels recemment ajoute's (android/intellij/webstorm/gitkraken)
+
+
+# Reboot le front
+Faire un front moderne, style card netflix
