@@ -292,90 +292,73 @@ class PackageFetcher:
             return "unknown", f"https://github.com/{repo}/releases/latest"
     
     def update_package_info(self, package: Dict) -> Dict:
-        """Update package with latest version info"""
-        package_id = package.get('id', '')
+        """Update package with latest version info (générique, basé sur url_pattern du JSON)"""
+        import re
+        version_str = package.get('version', 'latest')
+        url = package.get('url_pattern', '')
+        real_url = url
         
-        # Get version and URL based on package type
-        if package_id == 'discord':
-            version_str, url = self.get_discord_info()
-        elif package_id == 'vscode':
-            version_str, url = self.get_vscode_info()
-        elif package_id == 'postman':
-            version_str, url = self.get_postman_info()
-        elif package_id == 'obs-studio':
-            version_str, url = self.get_obs_info()
-        elif package_id == 'chrome':
-            version_str, url = self.get_chrome_info()
-        elif package_id == 'telegram':
-            version_str, url = self.get_telegram_info()
-        elif package_id == 'spotify':
-            version_str, url = self.get_spotify_info()
-        elif package_id == 'vlc':
-            version_str, url = self.get_vlc_info()
-        elif package_id == 'blender':
-            version_str, url = self.get_blender_info()
-        elif package_id == 'jetbrains_toolbox':
-            version_str, url = self.get_jetbrains_toolbox_info()
-        elif package_id == 'gitkraken':
-            version_str, url = self.get_gitkraken_info()
-        elif 'github_repo' in package:
-            version_str, url = self.get_github_release_info(package['github_repo'])
-        else:
-            # Use existing URL and try to detect version
-            version_str = package.get('version', 'latest')
-            url = package.get('url_pattern', '')
-        
-        # Update package info
+        # 1. On tente de détecter la version via redirection ou nom de fichier
+        try:
+            # Essayer HEAD d'abord pour suivre les redirections
+            resp = self.session.head(url, allow_redirects=False)
+            
+            if resp.status_code == 302:
+                # Redirection - récupérer l'URL finale
+                redirect_url = resp.headers.get('Location', '')
+                if redirect_url:
+                    real_url = redirect_url
+                    filename = redirect_url.split('/')[-1]
+                    # Ex: discord-0.0.XX.tar.gz
+                    version_match = re.search(r'(\d+\.\d+\.\d+)', filename)
+                    if version_match:
+                        version_str = version_match.group(1)
+            elif resp.status_code == 200:
+                # Pas de redirection, essayer avec l'URL finale
+                resp_full = self.session.head(url, allow_redirects=True)
+                if resp_full.url != url:
+                    real_url = resp_full.url
+                    filename = real_url.split('/')[-1]
+                    version_match = re.search(r'(\d+\.\d+\.\d+)', filename)
+                    if version_match:
+                        version_str = version_match.group(1)
+                        
+        except Exception as e:
+            pass
+            
+        # fallback: si pas de version trouvée, on garde 'latest' ou ce qui est dans le JSON
         updated_package = package.copy()
         updated_package['latest_version'] = version_str
         updated_package['url_pattern'] = url
+        updated_package['real_download_url'] = real_url
         
         return updated_package
     
-    def check_for_updates(self, installed_packages: Dict[str, str]) -> Dict[str, bool]:
-        """Check which packages have updates available"""
+    def check_for_updates(self, installed_packages: Dict[str, str], all_packages: Dict[str, Dict]) -> Dict[str, bool]:
+        """Check which packages have updates available (générique, basé sur url_pattern du JSON)"""
         updates = {}
-        
         for package_id, installed_version in installed_packages.items():
             if installed_version == "unknown":
                 updates[package_id] = True
                 continue
-                
             try:
-                # Get latest version for package
-                if package_id == 'discord':
-                    latest_version, _ = self.get_discord_info()
-                elif package_id == 'vscode':
-                    latest_version, _ = self.get_vscode_info()
-                elif package_id == 'postman':
-                    latest_version, _ = self.get_postman_info()
-                elif package_id == 'obs-studio':
-                    latest_version, _ = self.get_obs_info()
-                elif package_id == 'chrome':
-                    latest_version, _ = self.get_chrome_info()
-                elif package_id == 'telegram':
-                    latest_version, _ = self.get_telegram_info()
-                elif package_id == 'spotify':
-                    latest_version, _ = self.get_spotify_info()
-                elif package_id == 'vlc':
-                    latest_version, _ = self.get_vlc_info()
-                elif package_id == 'blender':
-                    latest_version, _ = self.get_blender_info()
-                elif package_id == 'jetbrains_toolbox':
-                    latest_version, _ = self.get_jetbrains_toolbox_info()
-                else:
+                package = all_packages.get(package_id)
+                if not package:
+                    updates[package_id] = False
                     continue
+                    
+                latest_version = package.get('latest_version', 'latest')
                 
                 if latest_version != "latest" and latest_version != "unknown":
                     try:
-                        updates[package_id] = version.parse(latest_version) > version.parse(installed_version)
-                    except:
-                        updates[package_id] = latest_version != installed_version
+                        needs_update = version.parse(latest_version) > version.parse(installed_version)
+                        updates[package_id] = needs_update
+                    except Exception as e:
+                        needs_update = latest_version != installed_version
+                        updates[package_id] = needs_update
                 else:
                     updates[package_id] = False
-                    
             except Exception as e:
                 print(f"Error checking updates for {package_id}: {e}")
                 updates[package_id] = False
-        
         return updates

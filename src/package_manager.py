@@ -41,9 +41,9 @@ class PackageManager:
             self.packages_config_dir = dev_packages_dir
         
     def get_available_packages(self) -> List[Dict]:
-        """Get list of available packages from config files"""
+        """Get list of available packages from config files (et retourne aussi un dict par id)"""
         packages = []
-        
+        self._package_dict = {}
         # Load packages from JSON configuration files
         if self.packages_config_dir.exists():
             for config_file in self.packages_config_dir.glob("*.json"):
@@ -52,12 +52,19 @@ class PackageManager:
                         package_config = json.load(f)
                         updated_package = self.fetcher.update_package_info(package_config)
                         packages.append(updated_package)
+                        self._package_dict[updated_package['id']] = updated_package
                 except Exception as e:
                     print(f"Error loading package config {config_file}: {e}")
         else:
             print(f"Warning: Package config directory not found: {self.packages_config_dir}")
-        
         return packages
+
+    def get_package_dict(self) -> Dict[str, Dict]:
+        """Retourne un dict {id: package} pour accès rapide"""
+        if hasattr(self, '_package_dict'):
+            return self._package_dict
+        self.get_available_packages()
+        return getattr(self, '_package_dict', {})
     
     def is_package_installed(self, package_id: str) -> bool:
         """Check if a package is already installed"""
@@ -498,28 +505,26 @@ Categories=Development;
             return False
 
     def check_for_updates(self) -> List[Dict]:
-        """Check for available updates for installed packages"""
+        """Check for available updates for installed packages (générique, basé sur url_pattern du JSON)"""
         available_updates = []
-        
         try:
-            # Get all available packages with latest versions
             all_packages = self.get_available_packages()
-            
+            package_dict = self.get_package_dict()
+            installed_versions = {}
             for package in all_packages:
                 if self.is_package_installed(package["id"]):
-                    installed_version = self.get_installed_version(package["id"])
-                    latest_version = package.get("version")
-                    
-                    if installed_version and latest_version and installed_version != latest_version:
-                        available_updates.append({
-                            "package": package,
-                            "installed_version": installed_version,
-                            "latest_version": latest_version
-                        })
-        
+                    installed_versions[package["id"]] = self.get_installed_version(package["id"])
+            updates = self.fetcher.check_for_updates(installed_versions, package_dict)
+            for package_id, need_update in updates.items():
+                if need_update:
+                    pkg = package_dict.get(package_id)
+                    available_updates.append({
+                        "package": pkg,
+                        "installed_version": installed_versions.get(package_id),
+                        "latest_version": pkg.get("latest_version")
+                    })
         except Exception as e:
             print(f"Error checking for updates: {e}")
-        
         return available_updates
     
     def get_installed_packages(self) -> List[Dict]:

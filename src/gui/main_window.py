@@ -45,12 +45,15 @@ class PackageWidget(QFrame):
     install_requested = pyqtSignal(dict)
     uninstall_requested = pyqtSignal(str)
     launch_requested = pyqtSignal(str)
+    update_requested = pyqtSignal(dict)  # Nouveau signal pour les mises à jour
     
-    def __init__(self, package, is_installed=False, version=None):
+    def __init__(self, package, is_installed=False, version=None, has_update=False, latest_version=None):
         super().__init__()
         self.package = package
         self.is_installed = is_installed
         self.version = version
+        self.has_update = has_update
+        self.latest_version = latest_version
         
         self.setup_ui()
     
@@ -92,9 +95,16 @@ class PackageWidget(QFrame):
         status_text = "Installed" if self.is_installed else "Not installed"
         if self.is_installed and self.version:
             status_text += f" (v{self.version})"
+        
+        # Afficher si une mise à jour est disponible
+        if self.has_update and self.latest_version:
+            status_text += f" → UPDATE AVAILABLE (v{self.latest_version})"
 
         status_label = QLabel(status_text)
-        status_label.setStyleSheet("color: #4a90e2; font-weight: bold;")
+        if self.has_update:
+            status_label.setStyleSheet("color: #e67e22; font-weight: bold;")  # Orange pour indiquer mise à jour
+        else:
+            status_label.setStyleSheet("color: #4a90e2; font-weight: bold;")
 
         info_layout.addLayout(name_layout)
         info_layout.addWidget(desc_label)
@@ -113,6 +123,13 @@ class PackageWidget(QFrame):
             self.spinner = SpinnerWidget()
             self.spinner.setVisible(False)
             button_layout.addWidget(self.spinner)
+
+            # Bouton Update si une mise à jour est disponible
+            if self.has_update:
+                self.update_button = QPushButton("Update")
+                self.update_button.setStyleSheet("background-color: #e67e22; color: white; font-weight: bold;")
+                self.update_button.clicked.connect(self.update_package)
+                button_layout.addWidget(self.update_button)
 
             self.action_button = QPushButton("Uninstall")
             self.action_button.setStyleSheet("background-color: #e74c3c;")
@@ -147,6 +164,10 @@ class PackageWidget(QFrame):
     def launch_package(self):
         """Request to launch the application"""
         self.launch_requested.emit(self.package["id"])
+    
+    def update_package(self):
+        """Request to update the package"""
+        self.update_requested.emit(self.package)
     
     def install_package(self):
         """Request package installation"""
@@ -477,15 +498,35 @@ class MainWindow(QMainWindow):
             if child and isinstance(child, PackageWidget):
                 child.setParent(None)
         
+        # Vérifier les mises à jour pour les packages installés
+        installed_packages = {}
+        package_dict = {}
+        for package in packages:
+            package_dict[package["id"]] = package
+            if self.package_manager.is_package_installed(package["id"]):
+                version = self.package_manager.get_installed_version(package["id"])
+                installed_packages[package["id"]] = version or "unknown"
+        
+        # Obtenir les informations de mise à jour
+        updates = {}
+        if installed_packages:
+            try:
+                updates = self.package_manager.fetcher.check_for_updates(installed_packages, package_dict)
+            except Exception as e:
+                pass  # Silently fail, updates will remain empty
+        
         # Add package widgets
         for package in packages:
             is_installed = self.package_manager.is_package_installed(package["id"])
             version = self.package_manager.get_installed_version(package["id"])
+            has_update = updates.get(package["id"], False)
+            latest_version = package.get("latest_version", None)
             
-            package_widget = PackageWidget(package, is_installed, version)
+            package_widget = PackageWidget(package, is_installed, version, has_update, latest_version)
             package_widget.install_requested.connect(self.install_package)
             package_widget.uninstall_requested.connect(self.uninstall_package)
             package_widget.launch_requested.connect(self.launch_package)
+            package_widget.update_requested.connect(self.update_package)  # Nouveau connecteur
             
             # Insert before the stretch
             self.packages_layout.insertWidget(self.packages_layout.count() - 1, package_widget)
@@ -544,6 +585,35 @@ class MainWindow(QMainWindow):
         
         self.install_worker.start()
     
+    def update_package(self, package):
+        """Update a package (re-install with latest version)"""
+        if self.install_worker and self.install_worker.isRunning():
+            QMessageBox.information(self, "Installation in Progress", 
+                                  "Another installation is already in progress. Please wait.")
+            return
+        
+        # Confirmer la mise à jour
+        reply = QMessageBox.question(self, "Update Package",
+                                   f"Do you want to update {package['name']} to the latest version?",
+                                   QMessageBox.Yes | QMessageBox.No)
+        
+        if reply == QMessageBox.Yes:
+            self.log_event(f"[ACTION] Updating {package['name']}...")
+            self.status_bar.showMessage(f"Updating {package['name']}...")
+            
+            # Find the package widget and set it to installing state
+            for i in range(self.packages_layout.count()):
+                widget = self.packages_layout.itemAt(i).widget()
+                if isinstance(widget, PackageWidget) and widget.package["id"] == package["id"]:
+                    widget.set_installing(True)
+                    break
+            
+            # Start update (which is essentially a re-install)
+            self.install_worker = PackageInstallWorker(self.package_manager, package)
+            self.install_worker.progress_changed.connect(self.update_progress)
+            self.install_worker.finished.connect(self.installation_finished)
+            self.install_worker.start()
+
     def uninstall_package(self, package_id):
         """Uninstall a package with process detection and GUI interaction"""
         # 1. Check for running processes
@@ -661,17 +731,22 @@ class MainWindow(QMainWindow):
         try:
             installed_packages = {}
             packages = self.package_manager.get_available_packages()
+            package_dict = self.package_manager.get_package_dict()
+            
             for package in packages:
                 if self.package_manager.is_package_installed(package["id"]):
                     version = self.package_manager.get_installed_version(package["id"])
                     installed_packages[package["id"]] = version or "unknown"
+            
             if not installed_packages:
                 QMessageBox.information(self, "No Updates", "No packages are currently installed.")
                 self.status_bar.showMessage("Ready")
                 self.log_event("[INFO] No packages installed.")
                 return
-            updates = self.package_manager.fetcher.check_for_updates(installed_packages)
+            
+            updates = self.package_manager.fetcher.check_for_updates(installed_packages, package_dict)
             update_count = sum(1 for has_update in updates.values() if has_update)
+            
             if update_count > 0:
                 QMessageBox.information(self, "Updates Available", 
                                       f"{update_count} package(s) have updates available. "
