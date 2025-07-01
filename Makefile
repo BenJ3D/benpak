@@ -78,6 +78,16 @@ install: build
 	@echo "Categories=System;" >> ~/.local/share/applications/benpak.desktop
 	@echo "Installation complete! You can now launch BenPak from the applications menu."
 
+# Full release and install process
+.PHONY: install-release
+install-release:
+	@echo "🚀 Starting full release and installation process..."
+	$(MAKE) release
+	@echo "📦 Release created, now installing..."
+	cd dist/benpak-distribution && ./install.sh
+	@echo "✅ Installation complete!"
+	@echo "You can now run BenPak with: benpak (if ~/bin is in PATH) or ~/bin/benpak"
+
 # Development mode with auto-reload
 .PHONY: dev
 dev:
@@ -102,25 +112,25 @@ dist-package: build
 	echo "echo \"Installing BenPak...\"" >> dist/benpak-distribution/install.sh
 	echo "" >> dist/benpak-distribution/install.sh
 	echo "# Créer les répertoires" >> dist/benpak-distribution/install.sh
-	echo "mkdir -p ~/Programs/benpak" >> dist/benpak-distribution/install.sh
-	echo "mkdir -p ~/Programs/benpak/packages/configs" >> dist/benpak-distribution/install.sh
+	echo "mkdir -p ~/bin" >> dist/benpak-distribution/install.sh
+	echo "mkdir -p ~/.local/share/benpak/packages/configs" >> dist/benpak-distribution/install.sh
 	echo "" >> dist/benpak-distribution/install.sh
 	echo "# Copier l'exécutable" >> dist/benpak-distribution/install.sh
-	echo "cp benpak ~/Programs/benpak/" >> dist/benpak-distribution/install.sh
-	echo "chmod +x ~/Programs/benpak/benpak" >> dist/benpak-distribution/install.sh
+	echo "cp benpak ~/bin/" >> dist/benpak-distribution/install.sh
+	echo "chmod +x ~/bin/benpak" >> dist/benpak-distribution/install.sh
 	echo "" >> dist/benpak-distribution/install.sh
 	echo "# Copier les fichiers de packages (s'ils existent)" >> dist/benpak-distribution/install.sh
 	echo "if [ -d \"packages\" ]; then" >> dist/benpak-distribution/install.sh
-	echo "    cp -r packages/* ~/Programs/benpak/packages/" >> dist/benpak-distribution/install.sh
+	echo "    cp -r packages/* ~/.local/share/benpak/packages/" >> dist/benpak-distribution/install.sh
 	echo "    echo \"Package configurations copied\"" >> dist/benpak-distribution/install.sh
 	echo "fi" >> dist/benpak-distribution/install.sh
 	echo "" >> dist/benpak-distribution/install.sh
-	echo "echo \"BenPak installed successfully in ~/Programs/benpak/\"" >> dist/benpak-distribution/install.sh
+	echo "echo \"BenPak installed successfully in ~/bin/\"" >> dist/benpak-distribution/install.sh
 	echo "echo \"\"" >> dist/benpak-distribution/install.sh
 	echo "echo \"To add new packages, simply drop JSON files into:\"" >> dist/benpak-distribution/install.sh
-	echo "echo \"~/Programs/benpak/packages/configs/\"" >> dist/benpak-distribution/install.sh
+	echo "echo \"~/.local/share/benpak/packages/configs/\"" >> dist/benpak-distribution/install.sh
 	echo "echo \"\"" >> dist/benpak-distribution/install.sh
-	echo "echo \"Run: ~/Programs/benpak/benpak\"" >> dist/benpak-distribution/install.sh
+	echo "echo \"Run: benpak (if ~/bin is in your PATH) or ~/bin/benpak\"" >> dist/benpak-distribution/install.sh
 	chmod +x dist/benpak-distribution/install.sh
 	cp README.md dist/benpak-distribution/README.txt
 	@echo "Distribution package created in dist/benpak-distribution/"
@@ -259,6 +269,7 @@ help:
 	@echo ""
 	@echo "🧹 Maintenance:"
 	@echo "  install       - Install built executable to ~/Programs"
+	@echo "  install-release - Full release and install process (release + install)"
 	@echo "  clean         - Clean build artifacts"
 	@echo "  clean-all     - Clean everything including virtual environment"
 	@echo "  help          - Show this help message"

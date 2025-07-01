@@ -29,16 +29,24 @@ class PackageManager:
         self.install_dir = Path(install_path)
         self.install_dir.mkdir(exist_ok=True)
         
-        # Chemin vers les packages JSON : priorité aux fichiers locaux, puis développement
-        # 1. Cherche d'abord dans ~/Programs/benpak/packages/configs (après installation)
-        local_packages_dir = Path.home() / "Programs" / "benpak" / "packages" / "configs"
-        # 2. Puis dans le dossier de développement
-        dev_packages_dir = Path(__file__).parent.parent / "packages" / "configs"
+        # Déterminer le chemin de base pour les ressources (comme packages/configs)
+        if getattr(sys, 'frozen', False):
+            # On est dans un bundle PyInstaller
+            bundle_dir = Path(sys._MEIPASS)
+        else:
+            # On est en mode développement
+            bundle_dir = Path(__file__).parent.parent
+
+        # Chemin vers les packages JSON : priorité aux fichiers locaux, puis ceux embarqués
+        # 1. Cherche d'abord dans ~/.local/share/benpak/packages/configs (après installation)
+        local_packages_dir = Path.home() / ".local" / "share" / "benpak" / "packages" / "configs"
+        # 2. Puis dans le dossier des packages embarqués dans l'exécutable
+        bundled_packages_dir = bundle_dir / "packages" / "configs"
         
-        if local_packages_dir.exists():
+        if local_packages_dir.exists() and any(local_packages_dir.iterdir()):
             self.packages_config_dir = local_packages_dir
         else:
-            self.packages_config_dir = dev_packages_dir
+            self.packages_config_dir = bundled_packages_dir
         
     def get_available_packages(self) -> List[Dict]:
         """Get list of available packages from config files (et retourne aussi un dict par id)"""
