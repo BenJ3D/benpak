@@ -1,0 +1,11 @@
+{
+    "name": "Postman",
+    "id": "postman",
+    "description": "API development environment",
+    "type": "tar.gz",
+    "url_pattern": "https://dl.pstmn.io/download/latest/linux64",
+    "extract_method": "tar_gz",
+    "icon": "📮",
+    "executable": "Postman",
+    "bin_path": ""
+}

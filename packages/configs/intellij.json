@@ -1,0 +1,11 @@
+{
+    "name": "IntelliJ IDEA",
+    "id": "intellij",
+    "description": "JetBrains IntelliJ IDEA Ultimate IDE",
+    "type": "tar.gz",
+    "url_pattern": "https://download.jetbrains.com/idea/ideaIU-2024.1.2.tar.gz",
+    "extract_method": "tar.gz",
+    "icon": "intellij.png",
+    "executable": "idea.sh",
+    "bin_path": "idea-*/bin"
+}

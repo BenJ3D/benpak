@@ -73,6 +73,28 @@ def test_fetcher():
         print(f"❌ Fetcher test failed: {e}")
         return False
 
+def test_shell_detection():
+    """Test shell detection and PATH configuration"""
+    print("\nTesting shell detection...")
+    try:
+        from package_manager import PackageManager
+        pm = PackageManager()
+        
+        shell_info = pm.get_shell_info()
+        print(f"✅ Shell detection working")
+        print(f"   Current shell: {shell_info['current_shell']}")
+        print(f"   Preferred shell: {shell_info['preferred_shell']}")
+        print(f"   Auto configure PATH: {shell_info['auto_configure_enabled']}")
+        print(f"   Detected config files:")
+        
+        for config_path, shell_name in shell_info['detected_configs']:
+            print(f"     - {config_path} ({shell_name})")
+        
+        return True
+    except Exception as e:
+        print(f"❌ Shell detection test failed: {e}")
+        return False
+
 def main():
     """Run all tests"""
     print("=== BenPak Component Tests ===\n")
@@ -80,7 +102,8 @@ def main():
     tests = [
         test_config,
         test_package_manager,
-        test_fetcher
+        test_fetcher,
+        test_shell_detection
     ]
     
     results = []

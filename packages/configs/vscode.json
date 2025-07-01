@@ -1,0 +1,11 @@
+{
+    "name": "Visual Studio Code",
+    "id": "vscode",
+    "description": "Code editor redefined and optimized for building modern applications",
+    "type": "deb",
+    "url_pattern": "https://code.visualstudio.com/sha/download?build=stable&os=linux-deb-x64",
+    "extract_method": "deb",
+    "bin_path": "usr/share/code/bin/code",
+    "icon": "💻",
+    "executable": "code"
+}

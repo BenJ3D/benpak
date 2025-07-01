@@ -1,31 +1,11 @@
 {
-  "id": "android-studio",
-  "name": "Android Studio",
-  "description": "The official IDE for Android development by Google",
-  "category": "development",
-  "developer": "Google",
-  "homepage": "https://developer.android.com/studio",
-  "license": "Apache 2.0",
-  "tags": ["ide", "android", "development", "google", "mobile"],
-  "version": "latest",
-  "url_pattern": "https://redirector.gvt1.com/edgedl/android/studio/ide-zips/{version}/android-studio-{version}-linux.tar.gz",
-  "archive_type": "tar.gz",
-  "extract_path": "android-studio",
-  "executable_path": "bin/studio.sh",
-  "icon_path": "bin/studio.png",
-  "desktop_file": {
     "name": "Android Studio",
-    "comment": "The official IDE for Android development",
-    "icon": "{install_path}/bin/studio.png",
-    "exec": "{install_path}/bin/studio.sh",
-    "categories": "Development;IDE;",
-    "mime_type": "text/x-gradle;text/x-java;application/x-gradle;"
-  },
-  "system_requirements": {
-    "min_ram": "8GB",
-    "disk_space": "4GB",
-    "arch": ["x86_64"]
-  },
-  "installation_notes": "Large download (~1GB). Requires Java runtime (included).",
-  "featured": true
+    "id": "android-studio",
+    "description": "Android development IDE by Google",
+    "type": "tar.gz",
+    "url_pattern": "https://redirector.gvt1.com/edgedl/android/studio/ide-zips/2024.1.1.21/android-studio-2024.1.1.21-linux.tar.gz",
+    "extract_method": "tar.gz",
+    "icon": "android-studio.png",
+    "executable": "studio.sh",
+    "bin_path": "android-studio/bin"
 }

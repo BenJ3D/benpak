@@ -10,8 +10,8 @@ from PyQt5.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                              QTextEdit, QGroupBox, QScrollArea, QFrame, QMenuBar,
                              QMenu, QAction, QDialog, QFormLayout, QLineEdit,
                              QCheckBox, QSpinBox, QDialogButtonBox)
-from PyQt5.QtCore import Qt, QThread, pyqtSignal, QTimer
-from PyQt5.QtGui import QFont, QPixmap, QIcon
+from PyQt5.QtCore import Qt, QThread, pyqtSignal, QTimer, QPropertyAnimation, QRect
+from PyQt5.QtGui import QFont, QPixmap, QIcon, QPainter, QPen, QColor
 
 from package_manager import PackageManager
 from config import Config
@@ -44,12 +44,16 @@ class PackageWidget(QFrame):
     
     install_requested = pyqtSignal(dict)
     uninstall_requested = pyqtSignal(str)
+    launch_requested = pyqtSignal(str)
+    update_requested = pyqtSignal(dict)  # Nouveau signal pour les mises à jour
     
-    def __init__(self, package, is_installed=False, version=None):
+    def __init__(self, package, is_installed=False, version=None, has_update=False, latest_version=None):
         super().__init__()
         self.package = package
         self.is_installed = is_installed
         self.version = version
+        self.has_update = has_update
+        self.latest_version = latest_version
         
         self.setup_ui()
     
@@ -65,44 +69,68 @@ class PackageWidget(QFrame):
                 margin: 5px;
             }
         """)
-        
+
         layout = QHBoxLayout(self)
-        
+
         # Package info
         info_layout = QVBoxLayout()
-        
+
         # Name and icon
         name_layout = QHBoxLayout()
         icon_label = QLabel(self.package.get("icon", "📦"))
         icon_label.setFont(QFont("Arial", 16))
         name_label = QLabel(self.package["name"])
         name_label.setFont(QFont("Arial", 12, QFont.Bold))
-        
+
         name_layout.addWidget(icon_label)
         name_layout.addWidget(name_label)
         name_layout.addStretch()
-        
+
         # Description
         desc_label = QLabel(self.package.get("description", ""))
         desc_label.setWordWrap(True)
         desc_label.setStyleSheet("color: #cccccc; font-size: 10px;")
-        
+
         # Status
         status_text = "Installed" if self.is_installed else "Not installed"
         if self.is_installed and self.version:
             status_text += f" (v{self.version})"
         
+        # Afficher si une mise à jour est disponible
+        if self.has_update and self.latest_version:
+            status_text += f" → UPDATE AVAILABLE (v{self.latest_version})"
+
         status_label = QLabel(status_text)
-        status_label.setStyleSheet("color: #4a90e2; font-weight: bold;")
-        
+        if self.has_update:
+            status_label.setStyleSheet("color: #e67e22; font-weight: bold;")  # Orange pour indiquer mise à jour
+        else:
+            status_label.setStyleSheet("color: #4a90e2; font-weight: bold;")
+
         info_layout.addLayout(name_layout)
         info_layout.addWidget(desc_label)
         info_layout.addWidget(status_label)
-        
+
         # Buttons
         button_layout = QVBoxLayout()
-        
+
         if self.is_installed:
+            # Launch button
+            self.launch_button = QPushButton("Lancer")
+            self.launch_button.setStyleSheet("background-color: #2980b9; color: white;")
+            self.launch_button.clicked.connect(self.launch_package)
+            button_layout.addWidget(self.launch_button)
+            # Beautiful spinner (hidden by default)
+            self.spinner = SpinnerWidget()
+            self.spinner.setVisible(False)
+            button_layout.addWidget(self.spinner)
+
+            # Bouton Update si une mise à jour est disponible
+            if self.has_update:
+                self.update_button = QPushButton("Update")
+                self.update_button.setStyleSheet("background-color: #e67e22; color: white; font-weight: bold;")
+                self.update_button.clicked.connect(self.update_package)
+                button_layout.addWidget(self.update_button)
+
             self.action_button = QPushButton("Uninstall")
             self.action_button.setStyleSheet("background-color: #e74c3c;")
             self.action_button.clicked.connect(self.uninstall_package)
@@ -110,12 +138,36 @@ class PackageWidget(QFrame):
             self.action_button = QPushButton("Install")
             self.action_button.setStyleSheet("background-color: #27ae60;")
             self.action_button.clicked.connect(self.install_package)
-        
+
         button_layout.addWidget(self.action_button)
         button_layout.addStretch()
-        
+
         layout.addLayout(info_layout, 3)
         layout.addLayout(button_layout, 1)
+
+    def set_launching(self, launching=True):
+        """Set launching state for the launch button"""
+        if hasattr(self, 'launch_button'):
+            if launching:
+                self.launch_button.setText("Lancement…")
+                self.launch_button.setEnabled(False)
+                self.launch_button.setStyleSheet("background-color: #7f8c8d; color: white;")  # Grayed out
+                if hasattr(self, 'spinner'):
+                    self.spinner.start()
+            else:
+                self.launch_button.setText("Lancer")
+                self.launch_button.setEnabled(True)
+                self.launch_button.setStyleSheet("background-color: #2980b9; color: white;")  # Back to blue
+                if hasattr(self, 'spinner'):
+                    self.spinner.stop()
+
+    def launch_package(self):
+        """Request to launch the application"""
+        self.launch_requested.emit(self.package["id"])
+    
+    def update_package(self):
+        """Request to update the package"""
+        self.update_requested.emit(self.package)
     
     def install_package(self):
         """Request package installation"""
@@ -140,64 +192,132 @@ class SettingsDialog(QDialog):
     
     def __init__(self, config, parent=None):
         super().__init__(parent)
+        self.setWindowTitle("Settings")
         self.config = config
-        self.setup_ui()
-    
-    def setup_ui(self):
-        """Setup the settings dialog UI"""
-        self.setWindowTitle("BenPak Settings")
-        self.setModal(True)
         self.resize(400, 300)
-        
+
         layout = QVBoxLayout(self)
-        
+
         # Form layout for settings
         form_layout = QFormLayout()
-        
+
         # Install directory
-        self.install_dir_edit = QLineEdit(self.config.get("install_directory"))
+        self.old_install_dir = self.config.get("install_directory")
+        self.install_dir_edit = QLineEdit(self.old_install_dir)
         form_layout.addRow("Install Directory:", self.install_dir_edit)
-        
+
         # Create desktop shortcuts
         self.shortcuts_checkbox = QCheckBox()
         self.shortcuts_checkbox.setChecked(self.config.get("create_desktop_shortcuts"))
         form_layout.addRow("Create Desktop Shortcuts:", self.shortcuts_checkbox)
-        
+
         # Auto refresh interval
         self.refresh_spinbox = QSpinBox()
         self.refresh_spinbox.setRange(10, 300)
         self.refresh_spinbox.setValue(self.config.get("auto_refresh_interval"))
         self.refresh_spinbox.setSuffix(" seconds")
         form_layout.addRow("Auto Refresh Interval:", self.refresh_spinbox)
-        
+
         # Download timeout
         self.timeout_spinbox = QSpinBox()
         self.timeout_spinbox.setRange(10, 120)
         self.timeout_spinbox.setValue(self.config.get("download_timeout"))
         self.timeout_spinbox.setSuffix(" seconds")
         form_layout.addRow("Download Timeout:", self.timeout_spinbox)
-        
+
         # Check updates on startup
         self.updates_checkbox = QCheckBox()
         self.updates_checkbox.setChecked(self.config.get("check_updates_on_startup"))
         form_layout.addRow("Check Updates on Startup:", self.updates_checkbox)
-        
+
         layout.addLayout(form_layout)
-        
+
         # Buttons
         button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         button_box.accepted.connect(self.accept)
         button_box.rejected.connect(self.reject)
         layout.addWidget(button_box)
-    
+
     def accept(self):
-        """Save settings and close dialog"""
-        self.config.set("install_directory", self.install_dir_edit.text())
+        """Save settings and close dialog, handle install dir change"""
+        new_install_dir = self.install_dir_edit.text()
         self.config.set("create_desktop_shortcuts", self.shortcuts_checkbox.isChecked())
         self.config.set("auto_refresh_interval", self.refresh_spinbox.value())
         self.config.set("download_timeout", self.timeout_spinbox.value())
         self.config.set("check_updates_on_startup", self.updates_checkbox.isChecked())
-        super().accept()
+
+        if new_install_dir != self.old_install_dir:
+            from PyQt5.QtWidgets import QMessageBox
+            msg = ("Le répertoire d'installation a été modifié. Les applications non désinstallées dans l'ancien répertoire n'apparaîtront plus dans le programme.\n\n"
+                   "Voulez-vous redémarrer l'application maintenant pour appliquer le changement ?")
+            reply = QMessageBox.question(self, "Redémarrage nécessaire", msg, QMessageBox.Yes | QMessageBox.No)
+            self.config.set("install_directory", new_install_dir)
+            if reply == QMessageBox.Yes:
+                self.restart_app()
+            else:
+                super().accept()
+        else:
+            self.config.set("install_directory", new_install_dir)
+            super().accept()
+
+    def restart_app(self):
+        """Restart the application"""
+        import sys, os
+        python = sys.executable
+        os.execl(python, python, *sys.argv)
+
+
+class SpinnerWidget(QLabel):
+    """A beautiful animated spinner widget"""
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedSize(20, 20)
+        self.angle = 0
+        self.timer = QTimer()
+        self.timer.timeout.connect(self.rotate)
+        self.setStyleSheet("background: transparent;")
+        
+    def start(self):
+        """Start the spinner animation"""
+        self.timer.start(50)  # Update every 50ms for smooth animation
+        self.show()
+        
+    def stop(self):
+        """Stop the spinner animation"""
+        self.timer.stop()
+        self.hide()
+        
+    def rotate(self):
+        """Rotate the spinner"""
+        self.angle = (self.angle + 15) % 360
+        self.update()
+        
+    def paintEvent(self, event):
+        """Custom paint event for the spinner"""
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        
+        # Draw spinning dots
+        painter.translate(self.width() / 2, self.height() / 2)
+        painter.rotate(self.angle)
+        
+        for i in range(8):
+            painter.save()
+            painter.rotate(i * 45)
+            
+            # Fade effect for trailing dots
+            alpha = 255 - (i * 25)
+            if alpha < 50:
+                alpha = 50
+                
+            color = QColor(74, 144, 226, alpha)  # Blue color with alpha
+            painter.setBrush(color)
+            painter.setPen(Qt.NoPen)
+            
+            # Draw dot
+            painter.drawEllipse(6, -1, 2, 2)
+            painter.restore()
 
 
 class MainWindow(QMainWindow):
@@ -378,14 +498,35 @@ class MainWindow(QMainWindow):
             if child and isinstance(child, PackageWidget):
                 child.setParent(None)
         
+        # Vérifier les mises à jour pour les packages installés
+        installed_packages = {}
+        package_dict = {}
+        for package in packages:
+            package_dict[package["id"]] = package
+            if self.package_manager.is_package_installed(package["id"]):
+                version = self.package_manager.get_installed_version(package["id"])
+                installed_packages[package["id"]] = version or "unknown"
+        
+        # Obtenir les informations de mise à jour
+        updates = {}
+        if installed_packages:
+            try:
+                updates = self.package_manager.fetcher.check_for_updates(installed_packages, package_dict)
+            except Exception as e:
+                pass  # Silently fail, updates will remain empty
+        
         # Add package widgets
         for package in packages:
             is_installed = self.package_manager.is_package_installed(package["id"])
             version = self.package_manager.get_installed_version(package["id"])
+            has_update = updates.get(package["id"], False)
+            latest_version = package.get("latest_version", None)
             
-            package_widget = PackageWidget(package, is_installed, version)
+            package_widget = PackageWidget(package, is_installed, version, has_update, latest_version)
             package_widget.install_requested.connect(self.install_package)
             package_widget.uninstall_requested.connect(self.uninstall_package)
+            package_widget.launch_requested.connect(self.launch_package)
+            package_widget.update_requested.connect(self.update_package)  # Nouveau connecteur
             
             # Insert before the stretch
             self.packages_layout.insertWidget(self.packages_layout.count() - 1, package_widget)
@@ -444,25 +585,103 @@ class MainWindow(QMainWindow):
         
         self.install_worker.start()
     
-    def uninstall_package(self, package_id):
-        """Uninstall a package"""
-        reply = QMessageBox.question(self, "Confirm Uninstall", 
-                                   f"Are you sure you want to uninstall this package?",
+    def update_package(self, package):
+        """Update a package (re-install with latest version)"""
+        if self.install_worker and self.install_worker.isRunning():
+            QMessageBox.information(self, "Installation in Progress", 
+                                  "Another installation is already in progress. Please wait.")
+            return
+        
+        # Confirmer la mise à jour
+        reply = QMessageBox.question(self, "Update Package",
+                                   f"Do you want to update {package['name']} to the latest version?",
                                    QMessageBox.Yes | QMessageBox.No)
         
         if reply == QMessageBox.Yes:
-            try:
-                success = self.package_manager.uninstall_package(package_id)
-                if success:
-                    self.status_bar.showMessage("Package uninstalled successfully")
-                    self.log_event(f"[ACTION] Uninstalled {package_id}.")
-                    self.refresh_packages()
-                else:
-                    QMessageBox.warning(self, "Uninstall Failed", "Failed to uninstall package")
-                    self.log_event(f"[ERROR] Failed to uninstall {package_id}.")
-            except Exception as e:
-                QMessageBox.critical(self, "Error", f"Uninstall failed: {str(e)}")
-                self.log_event(f"[ERROR] Uninstall failed: {str(e)}")
+            self.log_event(f"[ACTION] Updating {package['name']}...")
+            self.status_bar.showMessage(f"Updating {package['name']}...")
+            
+            # Find the package widget and set it to installing state
+            for i in range(self.packages_layout.count()):
+                widget = self.packages_layout.itemAt(i).widget()
+                if isinstance(widget, PackageWidget) and widget.package["id"] == package["id"]:
+                    widget.set_installing(True)
+                    break
+            
+            # Start update (which is essentially a re-install)
+            self.install_worker = PackageInstallWorker(self.package_manager, package)
+            self.install_worker.progress_changed.connect(self.update_progress)
+            self.install_worker.finished.connect(self.installation_finished)
+            self.install_worker.start()
+
+    def uninstall_package(self, package_id):
+        """Uninstall a package with process detection and GUI interaction"""
+        # 1. Check for running processes
+        try:
+            running_processes = self.package_manager._find_running_processes(package_id)
+        except Exception as e:
+            QMessageBox.critical(self, "Erreur", f"Échec de la détection des processus : {str(e)}")
+            self.log_event(f"[ERROR] Échec de la détection des processus : {str(e)}")
+            return
+
+        if running_processes:
+            # Build process info string
+            proc_lines = []
+            for proc in running_processes:
+                line = f"PID {proc.get('pid', '?')}: {proc.get('name', '?')} (cmd: {' '.join(proc.get('cmdline', []))})"
+                proc_lines.append(line)
+            proc_str = "\n".join(proc_lines)
+            msg = (f"Des processus liés à ce package sont en cours d'exécution :\n\n"
+                   f"{proc_str}\n\n"
+                   "Voulez-vous forcer la fermeture de ces processus et continuer la désinstallation ?")
+            reply = QMessageBox.question(self, "Processus en cours",
+                                        msg,
+                                        QMessageBox.Yes | QMessageBox.No)
+            if reply == QMessageBox.No:
+                self.status_bar.showMessage("Désinstallation annulée (processus en cours)")
+                self.log_event("[CANCEL] Désinstallation annulée par l'utilisateur (processus en cours)")
+                return
+            # Forcer le kill, puis attendre un délai avant retry
+            self.log_event(f"[ACTION] Killing {len(running_processes)} process(es) before uninstall...")
+            self.package_manager._kill_application_processes(running_processes)
+            self.status_bar.showMessage("Processus tués. Attente 4 secondes avant désinstallation...")
+            self.log_event("[INFO] Attente 4s pour libération des ressources système...")
+            QTimer.singleShot(4000, lambda: self._uninstall_package_final(package_id))
+        else:
+            # Aucun process bloquant, désinstaller directement
+            self._uninstall_package_final(package_id)
+
+    def _uninstall_package_final(self, package_id):
+        """Procède à la désinstallation effective après délai éventuel"""
+        # Vérifier si des processus sont encore en cours après le délai
+        try:
+            remaining_processes = self.package_manager._find_running_processes(package_id)
+            if remaining_processes:
+                proc_names = [proc.get('name', 'Unknown') for proc in remaining_processes]
+                msg = f"Certains processus sont encore en cours après le kill : {', '.join(proc_names)}\n\nLa désinstallation ne peut pas continuer."
+                QMessageBox.critical(self, "Processus toujours actifs", msg)
+                self.status_bar.showMessage("Désinstallation annulée - processus toujours actifs")
+                self.log_event(f"[ERROR] Processus toujours actifs après kill : {', '.join(proc_names)}")
+                return
+        except Exception as e:
+            self.log_event(f"[WARNING] Impossible de vérifier les processus restants : {str(e)}")
+        
+        # Procéder à la désinstallation
+        try:
+            success = self.package_manager.uninstall_package(package_id, force_kill=True)
+            if success:
+                self.status_bar.showMessage("Désinstallation réussie")
+                QMessageBox.information(self, "Succès", "Le package a été désinstallé avec succès.")
+                self.log_event(f"[SUCCESS] {package_id} désinstallé.")
+                self.refresh_packages()
+            else:
+                self.status_bar.showMessage("Échec de la désinstallation")
+                QMessageBox.warning(self, "Échec", "La désinstallation a échoué ou le package n'était pas installé.")
+                self.log_event(f"[ERROR] Échec de la désinstallation de {package_id}.")
+        except Exception as e:
+            self.status_bar.showMessage("Erreur lors de la désinstallation")
+            QMessageBox.critical(self, "Erreur", f"Erreur lors de la désinstallation : {str(e)}")
+            self.log_event(f"[ERROR] Exception lors de la désinstallation : {str(e)}")
 
     def update_progress(self, progress, message):
         """Update progress bar and status"""
@@ -512,17 +731,22 @@ class MainWindow(QMainWindow):
         try:
             installed_packages = {}
             packages = self.package_manager.get_available_packages()
+            package_dict = self.package_manager.get_package_dict()
+            
             for package in packages:
                 if self.package_manager.is_package_installed(package["id"]):
                     version = self.package_manager.get_installed_version(package["id"])
                     installed_packages[package["id"]] = version or "unknown"
+            
             if not installed_packages:
                 QMessageBox.information(self, "No Updates", "No packages are currently installed.")
                 self.status_bar.showMessage("Ready")
                 self.log_event("[INFO] No packages installed.")
                 return
-            updates = self.package_manager.fetcher.check_for_updates(installed_packages)
+            
+            updates = self.package_manager.fetcher.check_for_updates(installed_packages, package_dict)
             update_count = sum(1 for has_update in updates.values() if has_update)
+            
             if update_count > 0:
                 QMessageBox.information(self, "Updates Available", 
                                       f"{update_count} package(s) have updates available. "
@@ -536,3 +760,50 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Error", f"Failed to check for updates: {str(e)}")
             self.status_bar.showMessage("Update check failed")
             self.log_event(f"[ERROR] Update check failed: {str(e)}")
+
+    def launch_package(self, package_id):
+        """Launch an installed application from the package manager, UX feedback"""
+        # Find the widget and set launching state
+        widget = None
+        for i in range(self.packages_layout.count()):
+            w = self.packages_layout.itemAt(i).widget()
+            if isinstance(w, PackageWidget) and w.package["id"] == package_id:
+                widget = w
+                break
+        if widget:
+            widget.set_launching(True)
+        self.status_bar.showMessage(f"Lancement de {package_id}...")
+        self.log_event(f"[ACTION] Lancement de {package_id} demandé.")
+        # Lancer l'appli dans un QTimer pour UX (simulateur de spinner)
+        def do_launch():
+            try:
+                result = self.package_manager.launch_package(package_id)
+                if result is True or result is None:
+                    self.status_bar.showMessage(f"{package_id} lancé.")
+                    self.log_event(f"[SUCCESS] {package_id} lancé.")
+                else:
+                    QMessageBox.warning(self, "Erreur", str(result))
+                    self.log_event(f"[ERROR] Lancement échoué : {result}")
+            except Exception as e:
+                QMessageBox.critical(self, "Erreur", f"Erreur lors du lancement : {str(e)}")
+                self.log_event(f"[ERROR] Exception lors du lancement : {str(e)}")
+            finally:
+                if widget:
+                    widget.set_launching(False)
+        # Affiche le spinner 1s minimum pour le ressenti utilisateur
+        QTimer.singleShot(1000, do_launch)
+
+    def apply_quick_filter(self, filter_type):
+        """Apply quick filter to packages"""
+        if filter_type == "all":
+            filtered_packages = self.all_packages
+        else:
+            # Filter packages by category
+            filtered_packages = []
+            for package in self.all_packages:
+                category = package.get("category", "").lower()
+                if filter_type.lower() in category:
+                    filtered_packages.append(package)
+        
+        self.display_packages(filtered_packages)
+        self.status_bar.showMessage(f"Filtered by: {filter_type} ({len(filtered_packages)} packages)")
